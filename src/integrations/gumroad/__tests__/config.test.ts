@@ -38,7 +38,9 @@ describe("Gumroad Config", () => {
       expect(keys).toContain("revenue");
       expect(keys).toContain("subscription_revenue");
       expect(keys).toContain("one_time_revenue");
+      expect(keys).toContain("mrr");
       expect(keys).toContain("sales_count");
+      expect(keys).toContain("new_customers");
       expect(keys).toContain("products_count");
       expect(keys).toContain("active_subscriptions");
     });
@@ -51,6 +53,7 @@ describe("Gumroad Config", () => {
       expect(currencyKeys).toContain("revenue");
       expect(currencyKeys).toContain("subscription_revenue");
       expect(currencyKeys).toContain("one_time_revenue");
+      expect(currencyKeys).toContain("mrr");
     });
 
     it("should format count metrics as number", () => {

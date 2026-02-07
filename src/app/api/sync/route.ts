@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { syncAccount, syncAllAccounts } from "@/lib/sync/engine";
+import { syncAccount, syncAllAccounts, getAccountSyncStatus } from "@/lib/sync/engine";
+import { getSyncProgress } from "@/lib/sync/progress";
 import { loadAllIntegrations } from "@/integrations/registry";
 import { validateCsrf, validateAccountId } from "@/lib/security";
 
@@ -67,6 +68,14 @@ export async function POST(request: Request) {
   await ensureLoaded();
 
   const body = await request.json().catch(() => ({}));
+  const fromDate =
+    typeof body.from === "string" ? new Date(body.from) : undefined;
+  if (fromDate && Number.isNaN(fromDate.getTime())) {
+    return NextResponse.json(
+      { error: "Invalid from date" },
+      { status: 400 }
+    );
+  }
 
   if (body.accountId) {
     // Validate accountId
@@ -84,7 +93,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: cooldownError }, { status: 429 });
     }
 
-    const result = await syncAccount(body.accountId);
+    const syncOptions = body.fullSync
+      ? { fullSync: true, from: fromDate }
+      : fromDate
+        ? { from: fromDate }
+        : undefined;
+    const result = await syncAccount(body.accountId, undefined, syncOptions);
     recordSync(body.accountId);
     return NextResponse.json(result);
   }
@@ -95,7 +109,56 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: cooldownError }, { status: 429 });
   }
 
-  const results = await syncAllAccounts();
+  const syncOptions = body.fullSync
+    ? { fullSync: true, from: fromDate }
+    : fromDate
+      ? { from: fromDate }
+      : undefined;
+  const results = await syncAllAccounts(undefined, syncOptions);
   recordSync();
   return NextResponse.json(results);
+}
+
+/**
+ * GET /api/sync?accountId=...&progress=1
+ * - progress=1: returns live progress steps for an account, if available
+ * - otherwise: returns latest sync log data for an account
+ */
+export async function GET(request: Request) {
+  // CSRF check
+  const csrfError = validateCsrf(request);
+  if (csrfError) return csrfError;
+
+  await ensureLoaded();
+
+  const { searchParams } = new URL(request.url);
+  const accountId = searchParams.get("accountId");
+  const wantProgress = searchParams.get("progress") === "1";
+
+  if (!accountId) {
+    return NextResponse.json(
+      { error: "accountId is required" },
+      { status: 400 }
+    );
+  }
+
+  const accountIdError = validateAccountId(accountId);
+  if (accountIdError) {
+    return NextResponse.json(
+      { error: accountIdError.message },
+      { status: 400 }
+    );
+  }
+
+  if (wantProgress) {
+    const progress = getSyncProgress(accountId);
+    return NextResponse.json({ progress: progress || null });
+  }
+
+  const status = getAccountSyncStatus(accountId);
+  if (!status) {
+    return NextResponse.json({ status: null });
+  }
+
+  return NextResponse.json({ status });
 }

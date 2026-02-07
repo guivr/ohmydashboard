@@ -141,5 +141,24 @@ function initializeDatabase(sqlite: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_sync_logs_account ON sync_logs(account_id);
     CREATE INDEX IF NOT EXISTS idx_sync_logs_account_status ON sync_logs(account_id, status, started_at);
     CREATE INDEX IF NOT EXISTS idx_projects_account ON projects(account_id);
+
+    CREATE TABLE IF NOT EXISTS project_groups (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS project_group_members (
+      id TEXT PRIMARY KEY,
+      group_id TEXT NOT NULL REFERENCES project_groups(id) ON DELETE CASCADE,
+      account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+      project_id TEXT REFERENCES projects(id) ON DELETE CASCADE,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_pgm_group ON project_group_members(group_id);
+    CREATE INDEX IF NOT EXISTS idx_pgm_account ON project_group_members(account_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_pgm_dedup ON project_group_members(group_id, account_id, project_id);
   `);
 }

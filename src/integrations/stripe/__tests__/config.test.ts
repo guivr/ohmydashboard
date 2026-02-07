@@ -30,10 +30,13 @@ describe("Stripe Config", () => {
   it("should define expected metric types", () => {
     const metricKeys = stripeMetricTypes.map((m) => m.key);
     expect(metricKeys).toContain("revenue");
+    expect(metricKeys).toContain("subscription_revenue");
+    expect(metricKeys).toContain("one_time_revenue");
     expect(metricKeys).toContain("mrr");
     expect(metricKeys).toContain("active_subscriptions");
     expect(metricKeys).toContain("new_customers");
     expect(metricKeys).toContain("charges_count");
+    expect(metricKeys).toContain("sales_count");
     expect(metricKeys).toContain("refunds");
   });
 

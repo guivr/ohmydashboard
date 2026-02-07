@@ -1,15 +1,17 @@
 "use client";
 
-import { useIntegrations } from "@/hooks/use-metrics";
+import { useIntegrations, useProjectGroups } from "@/hooks/use-metrics";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AddAccountDialog } from "@/components/settings/add-account-dialog";
 import { AccountList } from "@/components/settings/account-list";
 import { Separator } from "@/components/ui/separator";
 import { apiDelete, apiPatch, apiPost } from "@/lib/api-client";
 import { IntegrationLogo } from "@/components/integration-logo";
+import { ProjectGroupsManager } from "@/components/settings/project-groups-manager";
 
 export default function SettingsPage() {
   const { data: integrations, loading, refetch } = useIntegrations();
+  const { data: projectGroups, loading: groupsLoading, refetch: refetchGroups } = useProjectGroups();
 
   const handleDelete = async (accountId: string) => {
     if (!confirm("Are you sure you want to delete this account? This will remove all associated data.")) {
@@ -48,6 +50,17 @@ export default function SettingsPage() {
               className="h-48 animate-pulse rounded-lg border border-border bg-card"
             />
           ))}
+        </div>
+      )}
+
+      {/* Project Groups */}
+      {!loading && !groupsLoading && (
+        <div className="mb-6">
+          <ProjectGroupsManager
+            groups={projectGroups}
+            integrations={integrations}
+            onGroupsChanged={refetchGroups}
+          />
         </div>
       )}
 

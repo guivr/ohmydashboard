@@ -19,7 +19,8 @@ export const stripeCredentials: CredentialField[] = [
     placeholder: "rk_live_... or rk_test_...",
     helpUrl: "https://dashboard.stripe.com/apikeys/create",
     helpText:
-      'Create a restricted key with only "Read" access to Charges, Customers, and Subscriptions. ' +
+      'Create a restricted key with "Read" access to Charges, Customers, Subscriptions, and Invoices. ' +
+      "Invoice read access is needed to accurately classify subscription vs one-time revenue. " +
       "Never use your full secret key (sk_live_*) — a restricted key limits exposure if compromised.",
     required: true,
   },
@@ -45,10 +46,22 @@ export const stripePermissions: RequiredPermission[] = [
     reason: "List active subscriptions to calculate MRR and subscription count",
   },
   {
+    resource: "invoices",
+    label: "Invoices",
+    access: "read",
+    reason: "Classify charges as subscription or one-time revenue via their invoice link",
+  },
+  {
     resource: "balance",
     label: "Balance",
     access: "read",
     reason: "Verify that your API key is valid when connecting",
+  },
+  {
+    resource: "balance_transactions",
+    label: "Balance Transactions",
+    access: "read",
+    reason: "Read processing fees from charge balance transactions",
   },
 ];
 
@@ -60,10 +73,28 @@ export const stripeMetricTypes: MetricTypeDefinition[] = [
     description: "Total revenue from successful charges",
   },
   {
+    key: "subscription_revenue",
+    label: "Subscription Revenue",
+    format: "currency",
+    description: "Revenue from charges linked to subscription invoices",
+  },
+  {
+    key: "one_time_revenue",
+    label: "One-Time Revenue",
+    format: "currency",
+    description: "Revenue from one-time (non-subscription) charges",
+  },
+  {
     key: "charges_count",
     label: "Charges",
     format: "number",
     description: "Number of successful charges",
+  },
+  {
+    key: "sales_count",
+    label: "Sales",
+    format: "number",
+    description: "Number of successful charges (unified with Gumroad sales_count)",
   },
   {
     key: "refunds",
@@ -88,6 +119,12 @@ export const stripeMetricTypes: MetricTypeDefinition[] = [
     label: "New Customers",
     format: "number",
     description: "Number of new customers created",
+  },
+  {
+    key: "platform_fees",
+    label: "Platform Fees",
+    format: "currency",
+    description: "Stripe processing fees from balance transactions",
   },
 ];
 

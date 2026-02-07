@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { metrics, accounts } from "@/lib/db/schema";
-import { eq, and, gte, lte, sql, desc, inArray } from "drizzle-orm";
+import { eq, and, gte, lte, sql, desc, inArray, notInArray } from "drizzle-orm";
 
 /**
  * GET /api/metrics
@@ -26,24 +26,95 @@ export async function GET(request: Request) {
 
   const db = getDb();
 
+  const stockMetricTypes = [
+    "mrr",
+    "active_subscriptions",
+    "active_trials",
+    "active_users",
+    "products_count",
+  ];
+
   // Build filter conditions — always exclude per-product metrics at this endpoint
-  const conditions = [];
-  conditions.push(sql`${metrics.projectId} IS NULL`);
+  const baseConditions = [];
+  baseConditions.push(sql`${metrics.projectId} IS NULL`);
 
   if (accountIds) {
     const ids = accountIds.split(",").filter(Boolean);
     if (ids.length > 0) {
-      conditions.push(inArray(metrics.accountId, ids));
+      baseConditions.push(inArray(metrics.accountId, ids));
     }
   } else if (accountId) {
-    conditions.push(eq(metrics.accountId, accountId));
+    baseConditions.push(eq(metrics.accountId, accountId));
   }
-  if (metricType) conditions.push(eq(metrics.metricType, metricType));
-  if (from) conditions.push(gte(metrics.date, from));
-  if (to) conditions.push(lte(metrics.date, to));
+  if (metricType) baseConditions.push(eq(metrics.metricType, metricType));
+
+  const dateConditions = [];
+  if (from) dateConditions.push(gte(metrics.date, from));
+  if (to) dateConditions.push(lte(metrics.date, to));
+
+  const conditions = [...baseConditions, ...dateConditions];
+
+  // For stock metrics (MRR, active_subscriptions, etc.), use the latest snapshot
+  // up to the range end (ignore range start).
+  const stockConditions = to
+    ? [...baseConditions, lte(metrics.date, to)]
+    : [...baseConditions];
 
   if (aggregation === "total") {
-    const result = db
+    // If a specific metricType is requested, handle stock vs flow differently.
+    if (metricType) {
+      if (stockMetricTypes.includes(metricType)) {
+        const latestStock = db
+          .select({
+            accountId: metrics.accountId,
+            metricType: metrics.metricType,
+            maxDate: sql<string>`MAX(${metrics.date})`.as("max_date"),
+          })
+          .from(metrics)
+          .where(and(...stockConditions))
+          .groupBy(metrics.accountId, metrics.metricType)
+          .as("latest_stock");
+
+        const result = db
+          .select({
+            metricType: metrics.metricType,
+            total: sql<number>`SUM(${metrics.value})`,
+            currency: metrics.currency,
+            count: sql<number>`COUNT(*)`,
+          })
+          .from(metrics)
+          .innerJoin(
+            latestStock,
+            and(
+              eq(metrics.accountId, latestStock.accountId),
+              eq(metrics.metricType, latestStock.metricType),
+              eq(metrics.date, latestStock.maxDate)
+            )
+          )
+          .where(sql`${metrics.projectId} IS NULL`)
+          .groupBy(metrics.metricType, metrics.currency)
+          .all();
+
+        return NextResponse.json(result);
+      }
+
+      const result = db
+        .select({
+          metricType: metrics.metricType,
+          total: sql<number>`SUM(${metrics.value})`,
+          currency: metrics.currency,
+          count: sql<number>`COUNT(*)`,
+        })
+        .from(metrics)
+        .where(and(...conditions))
+        .groupBy(metrics.metricType, metrics.currency)
+        .all();
+
+      return NextResponse.json(result);
+    }
+
+    // Mixed totals: sum flow metrics, use latest value per account for stock metrics.
+    const flowTotals = db
       .select({
         metricType: metrics.metricType,
         total: sql<number>`SUM(${metrics.value})`,
@@ -51,11 +122,42 @@ export async function GET(request: Request) {
         count: sql<number>`COUNT(*)`,
       })
       .from(metrics)
-      .where(and(...conditions))
+      .where(and(...conditions, notInArray(metrics.metricType, stockMetricTypes)))
       .groupBy(metrics.metricType, metrics.currency)
       .all();
 
-    return NextResponse.json(result);
+    const latestStock = db
+      .select({
+        accountId: metrics.accountId,
+        metricType: metrics.metricType,
+        maxDate: sql<string>`MAX(${metrics.date})`.as("max_date"),
+      })
+      .from(metrics)
+      .where(and(...stockConditions, inArray(metrics.metricType, stockMetricTypes)))
+      .groupBy(metrics.accountId, metrics.metricType)
+      .as("latest_stock");
+
+    const stockTotals = db
+      .select({
+        metricType: metrics.metricType,
+        total: sql<number>`SUM(${metrics.value})`,
+        currency: metrics.currency,
+        count: sql<number>`COUNT(*)`,
+      })
+      .from(metrics)
+      .innerJoin(
+        latestStock,
+        and(
+          eq(metrics.accountId, latestStock.accountId),
+          eq(metrics.metricType, latestStock.metricType),
+          eq(metrics.date, latestStock.maxDate)
+        )
+      )
+      .where(sql`${metrics.projectId} IS NULL`)
+      .groupBy(metrics.metricType, metrics.currency)
+      .all();
+
+    return NextResponse.json([...flowTotals, ...stockTotals]);
   }
 
   // Daily metrics

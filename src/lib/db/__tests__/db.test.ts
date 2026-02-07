@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { createTestDb } from "../index";
-import { accounts, projects, metrics, syncLogs, widgetConfigs } from "../schema";
+import { accounts, projects, metrics, syncLogs, widgetConfigs, projectGroups, projectGroupMembers } from "../schema";
 import { eq } from "drizzle-orm";
 
 function setup() {
@@ -259,6 +259,147 @@ describe("Database", () => {
       expect(result).toHaveLength(1);
       expect(result[0].status).toBe("success");
       expect(result[0].recordsProcessed).toBe(42);
+    });
+  });
+
+  describe("project_groups", () => {
+    it("should create a project group with members", () => {
+      const { db, cleanup: c } = setup();
+      cleanup = c;
+
+      const now = new Date().toISOString();
+      // Create accounts and projects first
+      db.insert(accounts).values([
+        { id: "acc-1", integrationId: "stripe", label: "Stripe", credentials: "{}", createdAt: now, updatedAt: now },
+        { id: "acc-2", integrationId: "gumroad", label: "Gumroad", credentials: "{}", createdAt: now, updatedAt: now },
+      ]).run();
+
+      db.insert(projects).values([
+        { id: "proj-1", accountId: "acc-1", label: "CSS Pro (Stripe)", createdAt: now, updatedAt: now },
+        { id: "proj-2", accountId: "acc-2", label: "CSS Pro (Gumroad)", createdAt: now, updatedAt: now },
+      ]).run();
+
+      // Create a group
+      db.insert(projectGroups).values({
+        id: "grp-1",
+        name: "CSS Pro",
+        createdAt: now,
+        updatedAt: now,
+      }).run();
+
+      // Add members
+      db.insert(projectGroupMembers).values([
+        { id: "pgm-1", groupId: "grp-1", accountId: "acc-1", projectId: "proj-1", createdAt: now },
+        { id: "pgm-2", groupId: "grp-1", accountId: "acc-2", projectId: "proj-2", createdAt: now },
+      ]).run();
+
+      const groups = db.select().from(projectGroups).all();
+      expect(groups).toHaveLength(1);
+      expect(groups[0].name).toBe("CSS Pro");
+
+      const members = db.select().from(projectGroupMembers).where(eq(projectGroupMembers.groupId, "grp-1")).all();
+      expect(members).toHaveLength(2);
+    });
+
+    it("should cascade delete members when group is deleted", () => {
+      const { db, cleanup: c } = setup();
+      cleanup = c;
+
+      const now = new Date().toISOString();
+      db.insert(accounts).values({
+        id: "acc-1", integrationId: "stripe", label: "Test", credentials: "{}", createdAt: now, updatedAt: now,
+      }).run();
+
+      db.insert(projectGroups).values({
+        id: "grp-1", name: "My Group", createdAt: now, updatedAt: now,
+      }).run();
+
+      db.insert(projectGroupMembers).values({
+        id: "pgm-1", groupId: "grp-1", accountId: "acc-1", projectId: null, createdAt: now,
+      }).run();
+
+      db.delete(projectGroups).where(eq(projectGroups.id, "grp-1")).run();
+
+      const members = db.select().from(projectGroupMembers).all();
+      expect(members).toHaveLength(0);
+    });
+
+    it("should cascade delete members when account is deleted", () => {
+      const { db, cleanup: c } = setup();
+      cleanup = c;
+
+      const now = new Date().toISOString();
+      db.insert(accounts).values({
+        id: "acc-1", integrationId: "stripe", label: "Test", credentials: "{}", createdAt: now, updatedAt: now,
+      }).run();
+
+      db.insert(projectGroups).values({
+        id: "grp-1", name: "My Group", createdAt: now, updatedAt: now,
+      }).run();
+
+      db.insert(projectGroupMembers).values({
+        id: "pgm-1", groupId: "grp-1", accountId: "acc-1", projectId: null, createdAt: now,
+      }).run();
+
+      db.delete(accounts).where(eq(accounts.id, "acc-1")).run();
+
+      const members = db.select().from(projectGroupMembers).all();
+      expect(members).toHaveLength(0);
+
+      // Group itself should still exist
+      const groups = db.select().from(projectGroups).all();
+      expect(groups).toHaveLength(1);
+    });
+
+    it("should enforce unique (groupId, accountId, projectId) constraint", () => {
+      const { db, cleanup: c } = setup();
+      cleanup = c;
+
+      const now = new Date().toISOString();
+      db.insert(accounts).values({
+        id: "acc-1", integrationId: "stripe", label: "Test", credentials: "{}", createdAt: now, updatedAt: now,
+      }).run();
+
+      db.insert(projects).values({
+        id: "proj-1", accountId: "acc-1", label: "Product", createdAt: now, updatedAt: now,
+      }).run();
+
+      db.insert(projectGroups).values({
+        id: "grp-1", name: "Group", createdAt: now, updatedAt: now,
+      }).run();
+
+      db.insert(projectGroupMembers).values({
+        id: "pgm-1", groupId: "grp-1", accountId: "acc-1", projectId: "proj-1", createdAt: now,
+      }).run();
+
+      // Inserting duplicate should throw
+      expect(() => {
+        db.insert(projectGroupMembers).values({
+          id: "pgm-2", groupId: "grp-1", accountId: "acc-1", projectId: "proj-1", createdAt: now,
+        }).run();
+      }).toThrow();
+    });
+
+    it("should allow account-level members with null projectId", () => {
+      const { db, cleanup: c } = setup();
+      cleanup = c;
+
+      const now = new Date().toISOString();
+      db.insert(accounts).values({
+        id: "acc-1", integrationId: "stripe", label: "Test", credentials: "{}", createdAt: now, updatedAt: now,
+      }).run();
+
+      db.insert(projectGroups).values({
+        id: "grp-1", name: "Group", createdAt: now, updatedAt: now,
+      }).run();
+
+      db.insert(projectGroupMembers).values({
+        id: "pgm-1", groupId: "grp-1", accountId: "acc-1", projectId: null, createdAt: now,
+      }).run();
+
+      const members = db.select().from(projectGroupMembers).all();
+      expect(members).toHaveLength(1);
+      expect(members[0].projectId).toBeNull();
     });
   });
 

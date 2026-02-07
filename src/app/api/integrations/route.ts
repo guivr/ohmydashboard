@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { accounts, projects } from "@/lib/db/schema";
+import { accounts, projects, syncLogs } from "@/lib/db/schema";
 import {
   getAllIntegrations,
   getIntegration,
@@ -14,6 +14,7 @@ import {
   validateCredentials,
   generateSecureId,
 } from "@/lib/security";
+import { desc } from "drizzle-orm";
 
 // Ensure integrations are loaded
 let loaded = false;
@@ -35,6 +36,14 @@ export async function GET() {
   const allIntegrations = getAllIntegrations();
   const allAccounts = db.select().from(accounts).all();
   const allProjects = db.select().from(projects).all();
+  const allSyncLogs = db.select().from(syncLogs).orderBy(desc(syncLogs.startedAt)).all();
+
+  const latestSyncByAccount = new Map<string, (typeof syncLogs.$inferSelect)>();
+  for (const log of allSyncLogs) {
+    if (!latestSyncByAccount.has(log.accountId)) {
+      latestSyncByAccount.set(log.accountId, log);
+    }
+  }
 
   const result = allIntegrations.map((integration) => ({
     id: integration.id,
@@ -52,6 +61,15 @@ export async function GET() {
         label: a.label,
         isActive: a.isActive,
         createdAt: a.createdAt,
+        lastSync: latestSyncByAccount.get(a.id)
+          ? {
+              status: latestSyncByAccount.get(a.id)!.status,
+              startedAt: latestSyncByAccount.get(a.id)!.startedAt,
+              completedAt: latestSyncByAccount.get(a.id)!.completedAt,
+              error: latestSyncByAccount.get(a.id)!.error,
+              recordsProcessed: latestSyncByAccount.get(a.id)!.recordsProcessed,
+            }
+          : null,
         // Include products (projects) for this account
         products: allProjects
           .filter((p) => p.accountId === a.id)

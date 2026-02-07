@@ -167,21 +167,25 @@ describe("DashboardFilter", () => {
     // Open Gumroad dropdown
     fireEvent.click(screen.getByText(/Gumroad/));
 
-    // Products should not be visible yet (need to expand)
-    expect(screen.queryByText("E-Book")).not.toBeInTheDocument();
+    // Products should be visible immediately (accounts with products start expanded)
+    expect(screen.getByText("E-Book")).toBeInTheDocument();
+    expect(screen.getByText("Course")).toBeInTheDocument();
 
-    // Click the expand chevron for Digital Products account
+    // Click the expand chevron to collapse
     const chevrons = screen.getAllByRole("button");
-    // Find the expand button (the one with ChevronRight)
     const expandButton = chevrons.find((btn) =>
       btn.querySelector("[class*='lucide-chevron-right']")
     );
     expect(expandButton).toBeDefined();
     fireEvent.click(expandButton!);
 
-    // Now products should be visible
+    // Now products should be hidden
+    expect(screen.queryByText("E-Book")).not.toBeInTheDocument();
+    expect(screen.queryByText("Course")).not.toBeInTheDocument();
+
+    // Re-expand
+    fireEvent.click(expandButton!);
     expect(screen.getByText("E-Book")).toBeInTheDocument();
-    expect(screen.getByText("Course")).toBeInTheDocument();
 
     // Toggle a product
     fireEvent.click(screen.getByText("E-Book"));

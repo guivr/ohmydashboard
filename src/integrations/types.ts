@@ -119,8 +119,13 @@ export interface DataFetcher {
    *
    * @param account - The account configuration with credentials
    * @param since - Optional date to fetch data from (for incremental sync)
+   * @param reportStep - Optional callback for reporting step completion in real time
    */
-  sync(account: AccountConfig, since?: Date): Promise<SyncResult>;
+  sync(
+    account: AccountConfig,
+    since?: Date,
+    reportStep?: (step: SyncStep) => void
+  ): Promise<SyncResult>;
 
   /**
    * Validate that the credentials are correct by making a test API call.

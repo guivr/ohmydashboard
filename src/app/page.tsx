@@ -2,10 +2,12 @@
 
 import { useDashboardData } from "@/hooks/use-dashboard-data";
 import { MetricCard, type RankingEntry } from "@/components/dashboard/metric-card";
-import { RevenueChart } from "@/components/dashboard/revenue-chart";
 import { EmptyState } from "@/components/dashboard/empty-state";
 import { DashboardFilter } from "@/components/dashboard/dashboard-filter";
+import { DateRangeFilter } from "@/components/dashboard/date-range-filter";
 import { SyncStatusBar } from "@/components/dashboard/sync-status-bar";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { formatBackfillErrorDetails } from "@/components/dashboard/backfill-error";
 import {
   DollarSign,
   Users,
@@ -14,9 +16,10 @@ import {
   Repeat,
   ShoppingBag,
   Package,
+  Landmark,
 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useCallback } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 
 export default function Dashboard() {
   const {
@@ -31,33 +34,199 @@ export default function Dashboard() {
     totalAccountCount,
     filteredAccountCount,
     handleFilterChange,
+    dateRangePreset,
+    compareEnabled,
+    compareBackfillStatus,
+    compareBackfillError,
+    rangeFrom,
+    rangeTo,
+    prevRangeFrom,
+    prevRangeTo,
+    handleDateRangeChange,
+    handleCompareToggle,
     currentTotals,
     previousTotals,
+    comparisonAvailability,
     revenueByDay,
+    metricsByDay,
+    revenueBreakdownByDay,
+    breakdownByMetricAndDay,
     accountRankings,
-    productRankings,
+    blendedRankings,
     handleSyncComplete,
   } = useDashboardData();
 
-  // Pick the best ranking for a metric: product-level if 2+ products, else account-level
+  const [backfillErrorOpen, setBackfillErrorOpen] = useState(false);
+
+  const comparisonLabel = useCallback(() => {
+    if (!compareEnabled) return undefined;
+    switch (dateRangePreset) {
+      case "today":
+        return "vs yesterday";
+      case "last_7_days":
+        return "vs previous 7 days";
+      case "last_4_weeks":
+        return "vs previous 4 weeks";
+      case "last_30_days":
+        return "vs previous 30 days";
+      case "month_to_date":
+        return "vs previous month-to-date";
+      case "quarter_to_date":
+        return "vs previous quarter-to-date";
+      case "year_to_date":
+        return "vs previous year-to-date";
+      case "all_time":
+      default:
+        return undefined;
+    }
+  }, [compareEnabled, dateRangePreset]);
+
+  const rangeSuffix = useCallback(() => {
+    switch (dateRangePreset) {
+      case "today":
+        return "Today";
+      case "last_7_days":
+        return "7d";
+      case "last_4_weeks":
+        return "4w";
+      case "last_30_days":
+        return "30d";
+      case "month_to_date":
+        return "MTD";
+      case "quarter_to_date":
+        return "QTD";
+      case "year_to_date":
+        return "YTD";
+      case "all_time":
+      default:
+        return "All time";
+    }
+  }, [dateRangePreset]);
+
+  const stockMetricKeys = useMemo(
+    () => new Set(["mrr", "active_subscriptions", "active_trials", "active_users", "products_count"]),
+    []
+  );
+
+  // Use blended rankings: product-level entries from integrations that have them,
+  // account-level entries from integrations that don't. Always reflects the full total.
   const getRanking = useCallback(
     (metricType: string): { ranking?: RankingEntry[]; label: string } => {
-      const productRanking = productRankings[metricType];
-      if (productRanking && productRanking.length > 1) {
-        return { ranking: productRanking, label: "Product leaderboard" };
+      const blended = blendedRankings[metricType];
+      if (blended && blended.length > 0) {
+        return { ranking: blended, label: "Breakdown" };
       }
       return { ranking: accountRankings[metricType], label: "Source leaderboard" };
     },
-    [accountRankings, productRankings]
+    [accountRankings, blendedRankings]
   );
 
-  // Revenue breakdown visibility
-  const hasRevenueBreakdown =
-    currentTotals.subscriptionRevenue > 0 || currentTotals.oneTimeRevenue > 0;
-  const hasSalesCount =
-    currentTotals.salesCount > 0 || previousTotals.salesCount > 0;
+  // Revenue breakdown: only show when there's actual subscription/one-time revenue data
+  // Checking if metrics exist (not just 0) by looking at any positive value or previous period
+  const hasSubscriptionRevenue =
+    currentTotals.subscriptionRevenue > 0 || previousTotals.subscriptionRevenue > 0;
+  const hasOneTimeRevenue =
+    currentTotals.oneTimeRevenue > 0 || previousTotals.oneTimeRevenue > 0;
+  const hasRevenueBreakdown = hasSubscriptionRevenue || hasOneTimeRevenue;
+  const hasPlatformFees =
+    currentTotals.platformFees > 0 || previousTotals.platformFees > 0;
 
   const { currency } = currentTotals;
+
+  type MetricCardConfig = {
+    title: string;
+    current: number;
+    previous: number;
+    format: "currency" | "number" | "percentage";
+    icon: ReactNode;
+    metricKey: string;
+    changeDirection?: "up" | "down";
+    subtitle?: string;
+  };
+
+  const metricCards: MetricCardConfig[] = [
+    {
+      title: `Total Revenue (${rangeSuffix()})`,
+      current: currentTotals.revenue,
+      previous: previousTotals.revenue,
+      format: "currency",
+      icon: <DollarSign className="h-4 w-4" />,
+      metricKey: "revenue",
+    },
+    {
+      title: "MRR",
+      current: currentTotals.mrr,
+      previous: previousTotals.mrr,
+      format: "currency",
+      icon: <TrendingUp className="h-4 w-4" />,
+      metricKey: "mrr",
+    },
+    {
+      title: "Net Revenue",
+      current: currentTotals.netRevenue,
+      previous: previousTotals.netRevenue,
+      format: "currency",
+      icon: <DollarSign className="h-4 w-4" />,
+      metricKey: "net_revenue",
+    },
+    {
+      title: "Active Subscriptions",
+      current: currentTotals.activeSubscriptions,
+      previous: previousTotals.activeSubscriptions,
+      format: "number",
+      icon: <CreditCard className="h-4 w-4" />,
+      metricKey: "active_subscriptions",
+    },
+    {
+      title: `New Customers (${rangeSuffix()})`,
+      current: currentTotals.newCustomers,
+      previous: previousTotals.newCustomers,
+      format: "number",
+      icon: <Users className="h-4 w-4" />,
+      metricKey: "new_customers",
+    },
+    ...((hasRevenueBreakdown || metricsLoading)
+      ? [
+          {
+            title: `Subscription Revenue (${rangeSuffix()})`,
+            current: currentTotals.subscriptionRevenue,
+            previous: previousTotals.subscriptionRevenue,
+            format: "currency",
+            icon: <Repeat className="h-4 w-4" />,
+            metricKey: "subscription_revenue",
+          },
+          {
+            title: `One-Time Revenue (${rangeSuffix()})`,
+            current: currentTotals.oneTimeRevenue,
+            previous: previousTotals.oneTimeRevenue,
+            format: "currency",
+            icon: <ShoppingBag className="h-4 w-4" />,
+            metricKey: "one_time_revenue",
+          },
+          {
+            title: `Total Sales (${rangeSuffix()})`,
+            current: currentTotals.salesCount,
+            previous: previousTotals.salesCount,
+            format: "number",
+            icon: <Package className="h-4 w-4" />,
+            metricKey: "sales_count",
+          },
+        ]
+      : []),
+    ...((hasPlatformFees || metricsLoading)
+      ? [
+          {
+            title: `Platform Fees (${rangeSuffix()})`,
+            current: currentTotals.platformFees,
+            previous: previousTotals.platformFees,
+            format: "currency",
+            icon: <Landmark className="h-4 w-4" />,
+            metricKey: "platform_fees",
+            changeDirection: "down",
+          },
+        ]
+      : []),
+  ];
 
   return (
     <div className="p-6 lg:p-8">
@@ -79,12 +248,34 @@ export default function Dashboard() {
       {/* Filter bar */}
       <div className="mb-6 min-h-[36px]">
         {hasAccounts && !integrationsLoading ? (
-          <DashboardFilter
-            integrations={integrations}
-            enabledAccountIds={enabledAccountIds}
-            enabledProjectIds={enabledProjectIds}
-            onFilterChange={handleFilterChange}
-          />
+          <div className="flex flex-wrap items-center gap-3">
+            <DashboardFilter
+              integrations={integrations}
+              enabledAccountIds={enabledAccountIds}
+              enabledProjectIds={enabledProjectIds}
+              onFilterChange={handleFilterChange}
+            />
+            <DateRangeFilter
+              value={dateRangePreset}
+              compareEnabled={compareEnabled}
+              onChange={handleDateRangeChange}
+              onCompareToggle={handleCompareToggle}
+            />
+            {compareBackfillStatus === "running" && (
+              <span className="text-xs text-muted-foreground">
+                Backfilling comparison data…
+              </span>
+            )}
+            {compareBackfillStatus === "error" && (
+              <button
+                type="button"
+                onClick={() => setBackfillErrorOpen(true)}
+                className="text-xs font-medium text-destructive hover:underline"
+              >
+                Backfill failed — details
+              </button>
+            )}
+          </div>
         ) : integrationsLoading ? (
           <div className="flex items-center gap-2">
             <Skeleton className="h-[30px] w-20" />
@@ -92,6 +283,19 @@ export default function Dashboard() {
           </div>
         ) : null}
       </div>
+
+      <Dialog open={backfillErrorOpen} onOpenChange={setBackfillErrorOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Backfill error</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 text-sm text-muted-foreground">
+            {formatBackfillErrorDetails(compareBackfillError).map((line, i) => (
+              <p key={`backfill-error-${i}`}>{line}</p>
+            ))}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Empty state */}
       {!loading && !hasAccounts && <EmptyState />}
@@ -106,133 +310,52 @@ export default function Dashboard() {
       {/* Dashboard content */}
       {(hasAccounts || loading) && filteredAccountCount !== 0 && (
         <div className="space-y-6">
-          {/* Primary Metric Cards */}
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            {([
-              {
-                title: "Total Revenue (30d)",
-                current: currentTotals.revenue,
-                previous: previousTotals.revenue,
-                format: "currency" as const,
-                icon: <DollarSign className="h-4 w-4" />,
-                metricKey: "revenue",
-              },
-              {
-                title: "MRR",
-                current: currentTotals.mrr,
-                previous: previousTotals.mrr,
-                format: "currency" as const,
-                icon: <TrendingUp className="h-4 w-4" />,
-                metricKey: "mrr",
-              },
-              {
-                title: "Active Subscriptions",
-                current: currentTotals.activeSubscriptions,
-                previous: previousTotals.activeSubscriptions,
-                format: "number" as const,
-                icon: <CreditCard className="h-4 w-4" />,
-                metricKey: "active_subscriptions",
-              },
-              {
-                title: "New Customers (30d)",
-                current: currentTotals.newCustomers,
-                previous: previousTotals.newCustomers,
-                format: "number" as const,
-                icon: <Users className="h-4 w-4" />,
-                metricKey: "new_customers",
-              },
-            ]).map((card) => {
+          {/* Metric Cards — 2 per row, each with inline chart */}
+          <div className="grid gap-4 md:grid-cols-2">
+            {metricCards.map((card) => {
               const { ranking, label } = getRanking(card.metricKey);
+              const canCompare = comparisonAvailability[card.metricKey] ?? true;
+              const isStockMetric = stockMetricKeys.has(card.metricKey);
+              const noCompareNote =
+                isStockMetric && !canCompare
+                  ? "Comparison unavailable — snapshot coverage is incomplete."
+                  : undefined;
               return (
                 <MetricCard
                   key={card.metricKey}
                   title={card.title}
                   value={card.current}
-                  previousValue={card.previous || undefined}
+                  previousValue={canCompare ? card.previous || undefined : undefined}
                   format={card.format}
                   currency={card.format === "currency" ? currency : undefined}
                   icon={card.icon}
                   ranking={ranking}
                   rankingLabel={label}
-                  description="vs previous 30 days"
+                  description={
+                    canCompare ? comparisonLabel() : noCompareNote
+                  }
+                  changeDirection={card.changeDirection}
+                  calculation={{
+                    metricKey: card.metricKey,
+                    isStock: stockMetricKeys.has(card.metricKey),
+                    from: rangeFrom,
+                    to: rangeTo,
+                    prevFrom: prevRangeFrom,
+                    prevTo: prevRangeTo,
+                    currentValue: card.current,
+                    previousValue: canCompare ? card.previous || undefined : undefined,
+                    compareEnabled,
+                    compareAvailable: canCompare,
+                  }}
+                  chartData={metricsByDay[card.metricKey]}
+                  chartId={card.metricKey}
+                  breakdownByDate={breakdownByMetricAndDay[card.metricKey]}
                   loading={metricsLoading}
+                  subtitle={"subtitle" in card ? (card as any).subtitle : undefined}
                 />
               );
             })}
           </div>
-
-          {/* Revenue Breakdown Cards */}
-          {(hasRevenueBreakdown || hasSalesCount) && !metricsLoading && (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {hasRevenueBreakdown && (
-                <>
-                  {(() => {
-                    const { ranking, label } = getRanking("subscription_revenue");
-                    return (
-                      <MetricCard
-                        title="Subscription Revenue (30d)"
-                        value={currentTotals.subscriptionRevenue}
-                        previousValue={previousTotals.subscriptionRevenue || undefined}
-                        format="currency"
-                        currency={currency}
-                        icon={<Repeat className="h-4 w-4" />}
-                        ranking={ranking}
-                        rankingLabel={label}
-                        description="vs previous 30 days"
-                      />
-                    );
-                  })()}
-                  {(() => {
-                    const { ranking, label } = getRanking("one_time_revenue");
-                    return (
-                      <MetricCard
-                        title="One-Time Revenue (30d)"
-                        value={currentTotals.oneTimeRevenue}
-                        previousValue={previousTotals.oneTimeRevenue || undefined}
-                        format="currency"
-                        currency={currency}
-                        icon={<ShoppingBag className="h-4 w-4" />}
-                        ranking={ranking}
-                        rankingLabel={label}
-                        description="vs previous 30 days"
-                      />
-                    );
-                  })()}
-                </>
-              )}
-              {hasSalesCount && (() => {
-                const { ranking, label } = getRanking("sales_count");
-                return (
-                  <MetricCard
-                    title="Total Sales (30d)"
-                    value={currentTotals.salesCount}
-                    previousValue={previousTotals.salesCount || undefined}
-                    format="number"
-                    icon={<Package className="h-4 w-4" />}
-                    ranking={ranking}
-                    rankingLabel={label}
-                    description="vs previous 30 days"
-                  />
-                );
-              })()}
-            </div>
-          )}
-
-          {/* Skeleton row while loading */}
-          {metricsLoading && (
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              <MetricCard title="Subscription Revenue (30d)" value={0} format="currency" icon={<Repeat className="h-4 w-4" />} loading />
-              <MetricCard title="One-Time Revenue (30d)" value={0} format="currency" icon={<ShoppingBag className="h-4 w-4" />} loading />
-              <MetricCard title="Total Sales (30d)" value={0} format="number" icon={<Package className="h-4 w-4" />} loading />
-            </div>
-          )}
-
-          {/* Revenue Chart */}
-          <RevenueChart
-            title="Revenue Over Time"
-            data={revenueByDay}
-            currency={currency}
-          />
         </div>
       )}
     </div>

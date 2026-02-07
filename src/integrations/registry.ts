@@ -68,6 +68,7 @@ export async function loadAllIntegrations(): Promise<void> {
   // Import each integration — they self-register via registerIntegration()
   await import("./stripe");
   await import("./gumroad");
+  await import("./revenuecat");
 }
 
 /**

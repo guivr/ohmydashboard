@@ -73,10 +73,22 @@ export const gumroadMetricTypes: MetricTypeDefinition[] = [
     description: "Revenue from one-time purchase products",
   },
   {
+    key: "mrr",
+    label: "MRR",
+    format: "currency",
+    description: "Monthly Recurring Revenue from active subscribers",
+  },
+  {
     key: "sales_count",
     label: "Sales",
     format: "number",
     description: "Number of successful sales",
+  },
+  {
+    key: "new_customers",
+    label: "New Customers",
+    format: "number",
+    description: "Unique first-time buyers (excludes subscription renewals)",
   },
   {
     key: "products_count",
@@ -89,6 +101,12 @@ export const gumroadMetricTypes: MetricTypeDefinition[] = [
     label: "Active Subscribers",
     format: "number",
     description: "Number of currently active subscribers across all membership products",
+  },
+  {
+    key: "platform_fees",
+    label: "Platform Fees",
+    format: "currency",
+    description: "Gumroad processing fees deducted from sales",
   },
 ];
 

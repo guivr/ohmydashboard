@@ -91,6 +91,15 @@ describe("MetricCard", () => {
     { label: "Side Project", integrationName: "Stripe", value: 500, percentage: 33.3 },
     { label: "Consulting", integrationName: "Gumroad", value: 200, percentage: 13.3 },
   ];
+  const longRanking: RankingEntry[] = [
+    { label: "Alpha", integrationName: "Stripe", value: 900, percentage: 30 },
+    { label: "Beta", integrationName: "Stripe", value: 800, percentage: 26.7 },
+    { label: "Gamma", integrationName: "Gumroad", value: 700, percentage: 23.3 },
+    { label: "Delta", integrationName: "Shopify", value: 300, percentage: 10 },
+    { label: "Epsilon", integrationName: "Shopify", value: 200, percentage: 6.7 },
+    { label: "Zeta", integrationName: "Lemon Squeezy", value: 100, percentage: 3.3 },
+    { label: "Eta", integrationName: "PayPal", value: 50, percentage: 1.7 },
+  ];
 
   it("should show top source crown badge when ranking has multiple entries", () => {
     render(
@@ -159,6 +168,40 @@ describe("MetricCard", () => {
     expect(mySaasEls.length).toBe(2); // crown badge + dropdown
     expect(screen.getByText("Side Project")).toBeInTheDocument();
     expect(screen.getByText("Consulting")).toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
+
+  it("should show top 5 entries and allow expanding remaining rankings", () => {
+    vi.useFakeTimers();
+
+    render(
+      <MetricCard
+        title="Total Revenue"
+        value={3050}
+        format="currency"
+        ranking={longRanking}
+      />
+    );
+
+    const card = screen.getByText("Total Revenue").closest("[class*='card']")!;
+    fireEvent.click(card);
+    act(() => { vi.advanceTimersByTime(100); });
+
+    expect(screen.getByText("Alpha")).toBeInTheDocument();
+    expect(screen.getByText("Beta")).toBeInTheDocument();
+    expect(screen.getByText("Gamma")).toBeInTheDocument();
+    expect(screen.getByText("Delta")).toBeInTheDocument();
+    expect(screen.getByText("Epsilon")).toBeInTheDocument();
+    expect(screen.queryByText("Zeta")).not.toBeInTheDocument();
+    expect(screen.queryByText("Eta")).not.toBeInTheDocument();
+
+    const expandButton = screen.getByRole("button", { name: "Expand (2 others)" });
+    fireEvent.click(expandButton);
+
+    expect(screen.getByText("Zeta")).toBeInTheDocument();
+    expect(screen.getByText("Eta")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show less" })).toBeInTheDocument();
 
     vi.useRealTimers();
   });

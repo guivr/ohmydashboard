@@ -71,37 +71,27 @@ const LOGOS: Record<string, (size: number) => React.ReactNode> = {
   ),
 
   gumroad: (size) => (
-    <svg
-      viewBox="0 0 24 24"
+    <img
+      src="/gumroad-logomark.png"
+      alt=""
       width={size}
       height={size}
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <rect width="24" height="24" rx="4" fill="#FF90E8" />
-      <path
-        d="M12 6a6 6 0 1 0 0 12 6 6 0 0 0 6-6h-3a3 3 0 1 1-3-3V6Z"
-        fill="#000"
-      />
-    </svg>
+      style={{ display: "block" }}
+      loading="lazy"
+      decoding="async"
+    />
   ),
 
   revenuecat: (size) => (
-    <svg
-      viewBox="0 0 24 24"
+    <img
+      src="/revenuecat-logomark.svg"
+      alt=""
       width={size}
       height={size}
-      fill="none"
-      xmlns="http://www.w3.org/2000/svg"
-    >
-      <rect width="24" height="24" rx="4" fill="#F25A5A" />
-      <path
-        d="M8 7.5c0-.28.22-.5.5-.5h3a4 4 0 0 1 0 8h-2v2.5a.5.5 0 0 1-1 0V15h-.5V7.5Zm1.5.5v5H12a3 3 0 0 0 0-6H9.5Z"
-        fill="white"
-        fillRule="evenodd"
-        clipRule="evenodd"
-      />
-    </svg>
+      style={{ display: "block" }}
+      loading="lazy"
+      decoding="async"
+    />
   ),
 
   mixpanel: (size) => (

@@ -6,6 +6,7 @@ import { LayoutDashboard, Settings, RefreshCw } from "lucide-react";
 import { apiPost } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useState } from "react";
 
 const navItems = [
@@ -70,8 +71,9 @@ export function Sidebar() {
         })}
       </nav>
 
-      {/* Sync Button */}
-      <div className="border-t border-border p-3">
+      {/* Theme + Sync */}
+      <div className="border-t border-border p-3 space-y-2">
+        <ThemeToggle />
         <Button
           variant="outline"
           size="sm"

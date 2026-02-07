@@ -3,9 +3,9 @@ import type { AccountConfig } from "../../types";
 
 // We need to mock Stripe before importing the fetcher
 const mockCharges = [
-  createMockCharge({ amount: 2999, created: dateToUnix("2026-02-01") }),
-  createMockCharge({ amount: 4999, created: dateToUnix("2026-02-01") }),
-  createMockCharge({ amount: 2999, created: dateToUnix("2026-02-02") }),
+  createMockCharge({ amount: 2999, created: dateToUnix("2026-02-01"), invoice: "in_sub1" }),
+  createMockCharge({ amount: 4999, created: dateToUnix("2026-02-01"), invoice: null }),
+  createMockCharge({ amount: 2999, created: dateToUnix("2026-02-02"), invoice: "in_sub2" }),
   createMockCharge({
     amount: 1000,
     created: dateToUnix("2026-02-03"),
@@ -54,6 +54,7 @@ function createMockCharge(overrides: {
   created: number;
   status?: string;
   currency?: string;
+  invoice?: string | null;
 }) {
   return {
     id: `ch_${Math.random().toString(36).slice(2)}`,
@@ -62,6 +63,7 @@ function createMockCharge(overrides: {
     created: overrides.created,
     currency: overrides.currency || "usd",
     status: overrides.status || "succeeded",
+    invoice: overrides.invoice ?? null,
   };
 }
 
@@ -257,6 +259,58 @@ describe("Stripe Fetcher", () => {
       // No revenue metric for Feb 3 (the failed charge day)
       const feb3 = revenueMetrics.find((m) => m.date === "2026-02-03");
       expect(feb3).toBeUndefined();
+    });
+
+    it("should classify subscription vs one-time revenue", async () => {
+      const result = await stripeFetcher.sync(
+        mockAccount,
+        new Date("2026-01-01")
+      );
+
+      const subRevenue = result.metrics.filter(
+        (m) => m.metricType === "subscription_revenue"
+      );
+      const oneTimeRevenue = result.metrics.filter(
+        (m) => m.metricType === "one_time_revenue"
+      );
+
+      // Feb 1: charge with invoice ($29.99) is subscription, charge without ($49.99) is one-time
+      const subFeb1 = subRevenue.find((m) => m.date === "2026-02-01");
+      expect(subFeb1?.value).toBeCloseTo(29.99);
+
+      const otFeb1 = oneTimeRevenue.find((m) => m.date === "2026-02-01");
+      expect(otFeb1?.value).toBeCloseTo(49.99);
+
+      // Feb 2: charge with invoice ($29.99) is subscription only
+      const subFeb2 = subRevenue.find((m) => m.date === "2026-02-02");
+      expect(subFeb2?.value).toBeCloseTo(29.99);
+
+      // Feb 2: no one-time charges, so one_time_revenue is 0
+      const otFeb2 = oneTimeRevenue.find((m) => m.date === "2026-02-02");
+      expect(otFeb2?.value).toBe(0);
+    });
+
+    it("should produce sales_count matching charges_count", async () => {
+      const result = await stripeFetcher.sync(
+        mockAccount,
+        new Date("2026-01-01")
+      );
+
+      const salesMetrics = result.metrics.filter(
+        (m) => m.metricType === "sales_count"
+      );
+      const chargeMetrics = result.metrics.filter(
+        (m) => m.metricType === "charges_count"
+      );
+
+      // sales_count should mirror charges_count
+      expect(salesMetrics).toHaveLength(chargeMetrics.length);
+
+      const salesFeb1 = salesMetrics.find((m) => m.date === "2026-02-01");
+      expect(salesFeb1?.value).toBe(2);
+
+      const salesFeb2 = salesMetrics.find((m) => m.date === "2026-02-02");
+      expect(salesFeb2?.value).toBe(1);
     });
   });
 

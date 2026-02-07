@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { apiGet } from "@/lib/api-client";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -63,11 +63,12 @@ export function useMetrics(options: UseMetricsOptions = {}) {
   );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isInitialLoad = useRef(true);
 
   const accountIdsKey = options.accountIds?.join(",") ?? "";
 
   const fetchMetrics = useCallback(async () => {
-    setLoading(true);
+    if (isInitialLoad.current) setLoading(true);
     setError(null);
 
     try {
@@ -89,7 +90,8 @@ export function useMetrics(options: UseMetricsOptions = {}) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
-      setLoading(false);
+      if (isInitialLoad.current) setLoading(false);
+      isInitialLoad.current = false;
     }
   }, [
     accountIdsKey,
@@ -122,11 +124,12 @@ export function useProductMetrics(options: UseProductMetricsOptions = {}) {
   const [data, setData] = useState<ProductMetricsResponse | ProductAggregatedMetric[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isInitialLoad = useRef(true);
 
   const accountIdsKey = options.accountIds?.join(",") ?? "";
 
   const fetchProductMetrics = useCallback(async () => {
-    setLoading(true);
+    if (isInitialLoad.current) setLoading(true);
     setError(null);
 
     try {
@@ -145,7 +148,8 @@ export function useProductMetrics(options: UseProductMetricsOptions = {}) {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
-      setLoading(false);
+      if (isInitialLoad.current) setLoading(false);
+      isInitialLoad.current = false;
     }
   }, [
     accountIdsKey,
@@ -163,22 +167,69 @@ export function useProductMetrics(options: UseProductMetricsOptions = {}) {
   return { data, loading, error, refetch: fetchProductMetrics };
 }
 
+// ─── useProjectGroups ──────────────────────────────────────────────────────────
+
+export interface ProjectGroupMemberResponse {
+  id: string;
+  accountId: string;
+  projectId: string | null;
+  accountLabel: string;
+  projectLabel: string | null;
+  integrationId: string | null;
+}
+
+export interface ProjectGroupResponse {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  members: ProjectGroupMemberResponse[];
+}
+
+export function useProjectGroups() {
+  const [data, setData] = useState<ProjectGroupResponse[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const isInitialLoad = useRef(true);
+
+  const fetchGroups = useCallback(async () => {
+    if (isInitialLoad.current) setLoading(true);
+    try {
+      const result = await apiGet<ProjectGroupResponse[]>("/api/project-groups");
+      setData(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      if (isInitialLoad.current) setLoading(false);
+      isInitialLoad.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchGroups();
+  }, [fetchGroups]);
+
+  return { data, loading, error, refetch: fetchGroups };
+}
+
 // ─── useIntegrations ──────────────────────────────────────────────────────────
 
 export function useIntegrations() {
   const [data, setData] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const isInitialLoad = useRef(true);
 
   const fetchIntegrations = useCallback(async () => {
-    setLoading(true);
+    if (isInitialLoad.current) setLoading(true);
     try {
       const result = await apiGet<any[]>("/api/integrations");
       setData(result);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
-      setLoading(false);
+      if (isInitialLoad.current) setLoading(false);
+      isInitialLoad.current = false;
     }
   }, []);
 

@@ -65,6 +65,18 @@ export const METRIC_KEYS = {
     format: "number" as const,
     description: "Number of active subscriptions or subscribers",
   },
+  active_trials: {
+    key: "active_trials",
+    label: "Active Trials",
+    format: "number" as const,
+    description: "Number of users currently in a free trial period",
+  },
+  active_users: {
+    key: "active_users",
+    label: "Active Users",
+    format: "number" as const,
+    description: "Number of unique users with activity in the last 28 days",
+  },
   new_customers: {
     key: "new_customers",
     label: "New Customers",

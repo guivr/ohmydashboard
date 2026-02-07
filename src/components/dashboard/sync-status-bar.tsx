@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { apiPost } from "@/lib/api-client";
+import { apiGet, apiPost } from "@/lib/api-client";
 import {
   RefreshCw,
   CheckCircle2,
@@ -39,6 +39,9 @@ interface SyncResult {
   recordsProcessed: number;
   error?: string;
   steps?: SyncStepResult[];
+  startedAt?: string;
+  completedAt?: string;
+  lastSyncAt?: string;
 }
 
 /** Per-account status while syncing */
@@ -50,6 +53,7 @@ interface AccountSyncState {
   steps?: SyncStepResult[];
   recordsProcessed: number;
   error?: string;
+  lastSyncAt?: string;
 }
 
 interface SyncStatusBarProps {
@@ -83,6 +87,28 @@ function formatStepDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+function formatLastUpdated(iso: string): string {
+  const updatedAt = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - updatedAt.getTime();
+  const minutes = Math.floor(diffMs / 60000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+
+  const datePart = new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  }).format(updatedAt);
+  const timePart = new Intl.DateTimeFormat(undefined, {
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(updatedAt);
+  return `${datePart} ${timePart}`;
+}
+
 // --- Component ---
 
 export function SyncStatusBar({
@@ -98,6 +124,7 @@ export function SyncStatusBar({
   const syncingRef = useRef(false);
   const startTimeRef = useRef<number>(0);
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   const hasAccounts = accounts.length > 0;
@@ -119,7 +146,14 @@ export function SyncStatusBar({
     }
   }, [dropdownOpen]);
 
-  const runSync = useCallback(async () => {
+  const stopProgressPolling = useCallback(() => {
+    if (progressTimerRef.current) {
+      clearInterval(progressTimerRef.current);
+      progressTimerRef.current = null;
+    }
+  }, []);
+
+  const runSync = useCallback(async (fullSync = false) => {
     if (syncingRef.current || accounts.length === 0) return;
     syncingRef.current = true;
 
@@ -132,6 +166,42 @@ export function SyncStatusBar({
       recordsProcessed: 0,
     }));
     setAccountStates(initialStates);
+
+    stopProgressPolling();
+    progressTimerRef.current = setInterval(async () => {
+      const syncingAccounts = accounts.filter(
+        (account) =>
+          accountStates.find((state) => state.accountId === account.id)
+            ?.status === "syncing"
+      );
+
+      if (syncingAccounts.length === 0) return;
+
+      await Promise.all(
+        syncingAccounts.map(async (account) => {
+          try {
+            const data = await apiGet<{
+              progress: {
+                status: "running" | "success" | "error";
+                steps?: SyncStepResult[];
+              } | null;
+            }>(`/api/sync?accountId=${account.id}&progress=1`);
+
+            if (!data.progress || !data.progress.steps) return;
+
+            setAccountStates((prev) =>
+              prev.map((s) =>
+                s.accountId === account.id
+                  ? { ...s, steps: data.progress?.steps ?? s.steps }
+                  : s
+              )
+            );
+          } catch {
+            // Ignore progress polling errors.
+          }
+        })
+      );
+    }, 800);
 
     // Start elapsed timer
     startTimeRef.current = Date.now();
@@ -157,7 +227,9 @@ export function SyncStatusBar({
           recordsProcessed: number;
           error?: string;
           steps?: SyncStepResult[];
-        }>("/api/sync", { accountId: account.id });
+          startedAt?: string;
+          completedAt?: string;
+        }>("/api/sync", { accountId: account.id, ...(fullSync ? { fullSync: true } : {}) });
 
         setAccountStates((prev) =>
           prev.map((s, idx) =>
@@ -168,6 +240,7 @@ export function SyncStatusBar({
                   steps: result.steps,
                   recordsProcessed: result.recordsProcessed,
                   error: result.error,
+                  lastSyncAt: result.completedAt ?? result.startedAt,
                 }
               : s
           )
@@ -175,6 +248,18 @@ export function SyncStatusBar({
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Sync failed";
         const isCooldown = msg.includes("cooldown");
+        let lastSyncAt: string | undefined;
+
+        if (isCooldown) {
+          try {
+            const data = await apiGet<{
+              status: { completedAt?: string; startedAt?: string } | null;
+            }>(`/api/sync?accountId=${account.id}`);
+            lastSyncAt = data.status?.completedAt ?? data.status?.startedAt;
+          } catch {
+            lastSyncAt = undefined;
+          }
+        }
 
         setAccountStates((prev) =>
           prev.map((s, idx) =>
@@ -184,6 +269,7 @@ export function SyncStatusBar({
                   status: isCooldown ? "cooldown" : "error",
                   recordsProcessed: 0,
                   error: isCooldown ? undefined : msg,
+                  lastSyncAt,
                 }
               : s
           )
@@ -199,6 +285,7 @@ export function SyncStatusBar({
       clearInterval(elapsedTimerRef.current);
       elapsedTimerRef.current = null;
     }
+    stopProgressPolling();
     const totalElapsed = Date.now() - startTimeRef.current;
 
     // Use a callback to read the latest accountStates
@@ -213,7 +300,7 @@ export function SyncStatusBar({
     });
 
     syncingRef.current = false;
-  }, [accounts, onSyncComplete]);
+  }, [accounts, accountStates, onSyncComplete, stopProgressPolling]);
 
   // Auto-sync on first mount
   useEffect(() => {
@@ -227,8 +314,9 @@ export function SyncStatusBar({
   useEffect(() => {
     return () => {
       if (elapsedTimerRef.current) clearInterval(elapsedTimerRef.current);
+      stopProgressPolling();
     };
-  }, []);
+  }, [stopProgressPolling]);
 
   if (!hasAccounts) return null;
 
@@ -250,7 +338,17 @@ export function SyncStatusBar({
         : "Syncing...";
     }
     if (isDone) {
-      if (totalRecords === 0 && failedCount === 0) return "Already up to date";
+      if (totalRecords === 0 && failedCount === 0) {
+        const latestSync = accountStates
+          .map((a) => a.lastSyncAt)
+          .filter(Boolean)
+          .sort()
+          .pop();
+        if (latestSync) {
+          return `Already up to date · Updated ${formatLastUpdated(latestSync)}`;
+        }
+        return "Already up to date";
+      }
       if (failedCount > 0) {
         return `${failedCount} ${failedCount === 1 ? "account" : "accounts"} failed`;
       }
@@ -336,7 +434,7 @@ export function SyncStatusBar({
             variant="ghost"
             size="sm"
             className="h-6 gap-1 px-2 text-xs text-muted-foreground"
-            onClick={runSync}
+            onClick={() => runSync(false)}
           >
             <RefreshCw className="h-3 w-3" />
             {phase.step === "idle" ? "Sync now" : "Re-sync"}
@@ -347,16 +445,47 @@ export function SyncStatusBar({
       {/* Dropdown — sync log todo list */}
       {dropdownOpen && (
         <div className="absolute right-0 top-full z-50 mt-2 w-80 overflow-hidden rounded-lg border border-border bg-popover shadow-lg">
-          <div className="border-b border-border px-3 py-2">
+          <div className="flex items-center justify-between border-b border-border px-3 py-2">
             <span className="text-xs font-medium text-foreground">
               Sync log
             </span>
+            {(() => {
+              const latestSync = accountStates
+                .map((a) => a.lastSyncAt)
+                .filter(Boolean)
+                .sort()
+                .pop();
+              return latestSync ? (
+                <span className="text-[11px] text-muted-foreground/60">
+                  {formatLastUpdated(latestSync)}
+                </span>
+              ) : null;
+            })()}
           </div>
           <div className="max-h-72 overflow-y-auto">
             {accountStates.map((account) => (
               <AccountSyncEntry key={account.accountId} account={account} />
             ))}
           </div>
+          {/* Full re-sync option */}
+          {!isSyncing && (
+            <div className="border-t border-border px-3 py-2">
+              <button
+                type="button"
+                className="flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-[11px] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+                onClick={() => {
+                  setDropdownOpen(false);
+                  runSync(true);
+                }}
+              >
+                <RefreshCw className="h-3 w-3" />
+                Full re-sync
+                <span className="ml-auto text-[10px] opacity-50">
+                  Re-fetches all data
+                </span>
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -366,8 +495,15 @@ export function SyncStatusBar({
 // --- Account entry in the dropdown ---
 
 function AccountSyncEntry({ account }: { account: AccountSyncState }) {
-  const { label, integrationName, status, steps, recordsProcessed, error } =
-    account;
+  const {
+    label,
+    integrationName,
+    status,
+    steps,
+    recordsProcessed,
+    error,
+    lastSyncAt,
+  } = account;
 
   return (
     <div className="border-b border-border/50 last:border-b-0">
@@ -435,6 +571,11 @@ function AccountSyncEntry({ account }: { account: AccountSyncState }) {
           <CheckCircle2 className="h-3 w-3 text-muted-foreground/50" />
           <span className="text-[11px] text-muted-foreground/70">
             Already up to date
+            {lastSyncAt && (
+              <span className="ml-1 opacity-60">
+                · Updated {formatLastUpdated(lastSyncAt)}
+              </span>
+            )}
           </span>
         </div>
       )}

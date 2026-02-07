@@ -12,6 +12,7 @@ import {
   CartesianGrid,
 } from "recharts";
 import { formatCurrency } from "@/lib/format";
+import { IntegrationLogo } from "@/components/integration-logo";
 
 interface RevenueChartProps {
   title: string;
@@ -19,6 +20,11 @@ interface RevenueChartProps {
     date: string;
     value: number;
   }>;
+  loading?: boolean;
+  breakdownByDate?: Record<
+    string,
+    Array<{ label: string; value: number; integrationName?: string }>
+  >;
   currency?: string;
   color?: string;
 }
@@ -37,17 +43,28 @@ function useResolvedColors(ref: React.RefObject<HTMLElement | null>) {
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const style = getComputedStyle(el);
-    const get = (name: string) => style.getPropertyValue(name).trim();
+    const update = () => {
+      const style = getComputedStyle(el);
+      const get = (name: string) => style.getPropertyValue(name).trim();
 
-    setColors({
-      chart: get("--chart-1") || colors.chart,
-      muted: get("--muted-foreground") || colors.muted,
-      grid: get("--border") || colors.grid,
-      card: get("--card") || colors.card,
+      setColors((prev) => ({
+        chart: get("--chart-1") || prev.chart,
+        muted: get("--muted-foreground") || prev.muted,
+        grid: get("--border") || prev.grid,
+        card: get("--card") || prev.card,
+      }));
+    };
+
+    update();
+
+    const observer = new MutationObserver(update);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class", "style"],
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+
+    return () => observer.disconnect();
+  }, [ref]);
 
   return colors;
 }
@@ -78,6 +95,8 @@ function formatTooltipDate(timestamp: number): string {
 export function RevenueChart({
   title,
   data,
+  loading = false,
+  breakdownByDate,
   currency = "USD",
   color,
 }: RevenueChartProps) {
@@ -96,7 +115,7 @@ export function RevenueChart({
 
     const start = new Date(sorted[0].date);
     const end = new Date(sorted[sorted.length - 1].date);
-    const result: Array<{ timestamp: number; value: number }> = [];
+    const result: Array<{ timestamp: number; value: number; date: string }> = [];
 
     const dataByDate = new Map(
       sorted.map((d) => [d.date, d.value])
@@ -108,6 +127,7 @@ export function RevenueChart({
       result.push({
         timestamp: current.getTime(),
         value: dataByDate.get(dateStr) ?? 0,
+        date: dateStr,
       });
       current.setDate(current.getDate() + 1);
     }
@@ -122,7 +142,12 @@ export function RevenueChart({
           {title}
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="relative">
+        {loading && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center rounded-md bg-background/70 text-xs font-medium text-muted-foreground backdrop-blur-sm">
+            Loading chart data…
+          </div>
+        )}
         {chartData.length === 0 ? (
           <div className="flex h-64 items-center justify-center text-sm text-muted-foreground">
             No data yet. Connect an account and sync to see your metrics.
@@ -166,6 +191,7 @@ export function RevenueChart({
                 content={({ active, payload }) => {
                   if (!active || !payload?.length) return null;
                   const point = payload[0].payload;
+                  const breakdown = breakdownByDate?.[point.date] ?? [];
                   return (
                     <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-md">
                       <p className="text-xs text-muted-foreground">
@@ -174,6 +200,36 @@ export function RevenueChart({
                       <p className="text-sm font-semibold">
                         {formatCurrency(point.value, currency)}
                       </p>
+                      {breakdown.length > 0 && (
+                        <div className="mt-2 border-t border-border pt-2">
+                          <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+                            Top products
+                          </p>
+                          <div className="space-y-1">
+                            {breakdown.map((item, idx) => (
+                              <div
+                                key={`${item.integrationName ?? "unknown"}:${item.label}:${idx}`}
+                                className="flex items-center justify-between gap-4 text-xs"
+                              >
+                                <span className="flex items-center gap-2 truncate">
+                                  {item.integrationName && (
+                                    <span className="flex h-4 w-4 items-center justify-center rounded-sm bg-muted">
+                                      <IntegrationLogo
+                                        integration={item.integrationName}
+                                        size={12}
+                                      />
+                                    </span>
+                                  )}
+                                  <span className="truncate">{item.label}</span>
+                                </span>
+                                <span className="font-medium">
+                                  {formatCurrency(item.value, currency)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   );
                 }}

@@ -169,6 +169,40 @@ describe("Sync Engine", () => {
       expect(result.error).toContain("not found");
     });
 
+    it("should not start a new sync when one is already running", async () => {
+      registerIntegration(createMockIntegration());
+
+      const now = new Date().toISOString();
+      db.insert(accounts)
+        .values({
+          id: "acc-1",
+          integrationId: "mock-integration",
+          label: "Test",
+          credentials: JSON.stringify({ api_key: "test" }),
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      db.insert(syncLogs)
+        .values({
+          id: "sync-running",
+          accountId: "acc-1",
+          status: "running",
+          startedAt: new Date().toISOString(),
+        })
+        .run();
+
+      const result = await syncAccount("acc-1", db as any);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("already running");
+
+      const logs = db.select().from(syncLogs).all();
+      expect(logs).toHaveLength(1);
+      expect(logs[0].status).toBe("running");
+    });
+
     it("should handle failed sync from fetcher", async () => {
       registerIntegration(
         createMockIntegration({
@@ -202,6 +236,39 @@ describe("Sync Engine", () => {
       const logs = db.select().from(syncLogs).all();
       expect(logs[0].status).toBe("error");
       expect(logs[0].error).toBe("API rate limit exceeded");
+    });
+
+    it("should pass explicit from date to fetcher", async () => {
+      let receivedSince: Date | undefined;
+      registerIntegration(
+        createMockIntegration({
+          syncFn: async (_account, since) => {
+            receivedSince = since;
+            return {
+              success: true,
+              recordsProcessed: 0,
+              metrics: [],
+            };
+          },
+        })
+      );
+
+      const now = new Date().toISOString();
+      db.insert(accounts)
+        .values({
+          id: "acc-1",
+          integrationId: "mock-integration",
+          label: "Test",
+          credentials: JSON.stringify({ api_key: "test" }),
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      const fromDate = new Date("2026-01-01T00:00:00.000Z");
+      await syncAccount("acc-1", db as any, { from: fromDate });
+
+      expect(receivedSince?.toISOString()).toBe(fromDate.toISOString());
     });
 
     it("should upsert metrics (update existing for same account+type+date)", async () => {

@@ -50,8 +50,29 @@ export function DashboardFilter({
   enabledProjectIds,
   onFilterChange,
 }: DashboardFilterProps) {
+  const isLightColor = (hex?: string) => {
+    if (!hex) return false;
+    const clean = hex.replace("#", "");
+    if (clean.length !== 6) return false;
+    const r = parseInt(clean.slice(0, 2), 16) / 255;
+    const g = parseInt(clean.slice(2, 4), 16) / 255;
+    const b = parseInt(clean.slice(4, 6), 16) / 255;
+    const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    return luminance > 0.6;
+  };
   const [openIntegration, setOpenIntegration] = useState<string | null>(null);
-  const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
+  // Start with all accounts that have products expanded so products are visible
+  const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(() => {
+    const withProducts = new Set<string>();
+    for (const integration of integrations) {
+      for (const account of integration.accounts) {
+        if (account.products && account.products.length > 0) {
+          withProducts.add(account.id);
+        }
+      }
+    }
+    return withProducts;
+  });
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Only show integrations that have connected accounts
@@ -158,6 +179,8 @@ export function DashboardFilter({
         const someEnabled = enabledCount > 0 && !allEnabled;
         const isOpen = openIntegration === integration.id;
         const accountCount = integration.accounts.length;
+        const lightBg = isLightColor(integration.color);
+        const activeTextClass = lightBg ? "text-black" : "text-white";
         const totalProducts = integration.accounts.reduce(
           (sum, a) => sum + (a.products?.length ?? 0),
           0
@@ -174,9 +197,9 @@ export function DashboardFilter({
               className={cn(
                 "flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors",
                 allEnabled
-                  ? "border-transparent text-white"
+                  ? `border-transparent ${activeTextClass}`
                   : someEnabled
-                    ? "border-transparent text-white opacity-80"
+                    ? `border-transparent ${activeTextClass} opacity-80`
                     : "border-border text-muted-foreground hover:border-muted-foreground/30"
               )}
               style={
@@ -218,9 +241,9 @@ export function DashboardFilter({
                     className={cn(
                       "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
                       allEnabled
-                        ? "border-transparent text-white"
+                        ? `border-transparent ${activeTextClass}`
                         : someEnabled
-                          ? "border-transparent text-white"
+                          ? `border-transparent ${activeTextClass}`
                           : "border-border"
                     )}
                     style={
@@ -280,7 +303,7 @@ export function DashboardFilter({
                             className={cn(
                               "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
                               isAccountEnabled
-                                ? "border-transparent text-white"
+                                ? `border-transparent ${activeTextClass}`
                                 : "border-border"
                             )}
                             style={
@@ -325,15 +348,15 @@ export function DashboardFilter({
                                 className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-[11px] hover:bg-accent"
                               >
                                 <span
-                                  className={cn(
-                                    "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border",
-                                    isProductEnabled
-                                      ? "border-transparent text-white"
-                                      : "border-border"
-                                  )}
-                                  style={
-                                    isProductEnabled
-                                      ? { backgroundColor: integration.color }
+                                className={cn(
+                                  "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border",
+                                  isProductEnabled
+                                    ? `border-transparent ${activeTextClass}`
+                                    : "border-border"
+                                )}
+                                style={
+                                  isProductEnabled
+                                    ? { backgroundColor: integration.color }
                                       : undefined
                                   }
                                 >

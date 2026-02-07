@@ -83,6 +83,38 @@ export const widgetConfigs = sqliteTable("widget_configs", {
   updatedAt: text("updated_at").notNull(),
 });
 
+/**
+ * Project groups let users merge data from multiple accounts/products
+ * into a single logical project (e.g. "CSS Pro" across Gumroad + Stripe).
+ */
+export const projectGroups = sqliteTable("project_groups", {
+  id: text("id").primaryKey(), // UUID
+  name: text("name").notNull(), // User-chosen name, e.g. "CSS Pro"
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+});
+
+/**
+ * Members of a project group — each row maps an account or a specific
+ * product within an account to a group.
+ *
+ * If projectId is NULL, the entire account is included.
+ * If projectId is set, only that product's metrics are included.
+ */
+export const projectGroupMembers = sqliteTable("project_group_members", {
+  id: text("id").primaryKey(), // UUID
+  groupId: text("group_id")
+    .notNull()
+    .references(() => projectGroups.id, { onDelete: "cascade" }),
+  accountId: text("account_id")
+    .notNull()
+    .references(() => accounts.id, { onDelete: "cascade" }),
+  projectId: text("project_id").references(() => projects.id, {
+    onDelete: "cascade",
+  }),
+  createdAt: text("created_at").notNull(),
+});
+
 // ─── Type Exports ───────────────────────────────────────────────────────────
 
 export type Account = typeof accounts.$inferSelect;
@@ -95,3 +127,7 @@ export type Metric = typeof metrics.$inferSelect;
 export type NewMetric = typeof metrics.$inferInsert;
 export type WidgetConfig = typeof widgetConfigs.$inferSelect;
 export type NewWidgetConfig = typeof widgetConfigs.$inferInsert;
+export type ProjectGroup = typeof projectGroups.$inferSelect;
+export type NewProjectGroup = typeof projectGroups.$inferInsert;
+export type ProjectGroupMember = typeof projectGroupMembers.$inferSelect;
+export type NewProjectGroupMember = typeof projectGroupMembers.$inferInsert;
