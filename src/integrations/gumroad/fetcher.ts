@@ -363,7 +363,7 @@ function computeActiveSubscribers(
 
     // Per-product subscriber count
     allMetrics.push({
-      metricType: "active_subscribers",
+      metricType: "active_subscriptions",
       value: activeCount,
       date: today,
       projectId: productId,
@@ -376,7 +376,7 @@ function computeActiveSubscribers(
 
   // Account-level total
   allMetrics.push({
-    metricType: "active_subscribers",
+    metricType: "active_subscriptions",
     value: totalActive,
     date: today,
   });

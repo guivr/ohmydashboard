@@ -129,23 +129,6 @@ export interface DataFetcher {
   validateCredentials(credentials: Record<string, string>): Promise<boolean>;
 }
 
-// ─── Widget Types ───────────────────────────────────────────────────────────
-
-export type WidgetSize = "sm" | "md" | "lg" | "xl";
-
-export interface WidgetDefinition {
-  /** Unique widget type ID, e.g. "stripe_mrr_card" */
-  id: string;
-  /** Display name for the widget */
-  name: string;
-  /** Description of what this widget shows */
-  description: string;
-  /** Default size for this widget */
-  defaultSize: WidgetSize;
-  /** The metric types this widget can display */
-  supportedMetricTypes: string[];
-}
-
 // ─── Integration Definition ─────────────────────────────────────────────────
 
 export interface IntegrationDefinition {
@@ -165,12 +148,9 @@ export interface IntegrationDefinition {
   metricTypes: MetricTypeDefinition[];
   /** Data fetcher implementation */
   fetcher: DataFetcher;
-  /** Available widget definitions */
-  widgets: WidgetDefinition[];
   /**
    * Explicit list of permissions this integration requires.
    * Shown to the user before they connect so they know exactly what access is needed.
-   * Optional — integrations without granular permission models can omit this.
    */
   requiredPermissions?: RequiredPermission[];
 }

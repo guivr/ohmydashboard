@@ -9,7 +9,6 @@ import {
   stripeCredentials,
   stripeMetricTypes,
   stripePermissions,
-  stripeWidgets,
 } from "./config";
 import { stripeFetcher } from "./fetcher";
 
@@ -22,7 +21,6 @@ const stripeIntegration: IntegrationDefinition = {
   credentials: stripeCredentials,
   metricTypes: stripeMetricTypes,
   fetcher: stripeFetcher,
-  widgets: stripeWidgets,
   requiredPermissions: stripePermissions,
 };
 

@@ -41,15 +41,6 @@ function createMockIntegration(
       }),
       validateCredentials: async () => true,
     },
-    widgets: [
-      {
-        id: "test_card",
-        name: "Test Card",
-        description: "A test widget",
-        defaultSize: "sm",
-        supportedMetricTypes: ["revenue"],
-      },
-    ],
     ...overrides,
   };
 }
@@ -123,7 +114,6 @@ describe("Integration Registry", () => {
     expect(integration.fetcher).toBeDefined();
     expect(integration.fetcher.sync).toBeInstanceOf(Function);
     expect(integration.fetcher.validateCredentials).toBeInstanceOf(Function);
-    expect(integration.widgets).toBeDefined();
     expect(integration.metricTypes).toBeDefined();
   });
 });

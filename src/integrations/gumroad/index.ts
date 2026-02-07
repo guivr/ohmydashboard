@@ -9,7 +9,6 @@ import {
   gumroadCredentials,
   gumroadMetricTypes,
   gumroadPermissions,
-  gumroadWidgets,
 } from "./config";
 import { gumroadFetcher } from "./fetcher";
 
@@ -22,7 +21,6 @@ const gumroadIntegration: IntegrationDefinition = {
   credentials: gumroadCredentials,
   metricTypes: gumroadMetricTypes,
   fetcher: gumroadFetcher,
-  widgets: gumroadWidgets,
   requiredPermissions: gumroadPermissions,
 };
 

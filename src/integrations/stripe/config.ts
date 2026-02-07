@@ -2,7 +2,6 @@ import type {
   CredentialField,
   MetricTypeDefinition,
   RequiredPermission,
-  WidgetDefinition,
 } from "../types";
 
 export const STRIPE_ID = "stripe";
@@ -92,40 +91,4 @@ export const stripeMetricTypes: MetricTypeDefinition[] = [
   },
 ];
 
-export const stripeWidgets: WidgetDefinition[] = [
-  {
-    id: "stripe_revenue_card",
-    name: "Revenue",
-    description: "Total revenue from Stripe charges",
-    defaultSize: "sm",
-    supportedMetricTypes: ["revenue"],
-  },
-  {
-    id: "stripe_mrr_card",
-    name: "MRR",
-    description: "Monthly Recurring Revenue",
-    defaultSize: "sm",
-    supportedMetricTypes: ["mrr"],
-  },
-  {
-    id: "stripe_revenue_chart",
-    name: "Revenue Over Time",
-    description: "Revenue trend chart",
-    defaultSize: "lg",
-    supportedMetricTypes: ["revenue"],
-  },
-  {
-    id: "stripe_subscriptions_card",
-    name: "Active Subscriptions",
-    description: "Current active subscription count",
-    defaultSize: "sm",
-    supportedMetricTypes: ["active_subscriptions"],
-  },
-  {
-    id: "stripe_customers_card",
-    name: "New Customers",
-    description: "New customers over time",
-    defaultSize: "sm",
-    supportedMetricTypes: ["new_customers"],
-  },
-];
+

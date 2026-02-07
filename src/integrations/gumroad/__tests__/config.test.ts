@@ -6,7 +6,6 @@ import {
   gumroadCredentials,
   gumroadMetricTypes,
   gumroadPermissions,
-  gumroadWidgets,
 } from "../config";
 
 describe("Gumroad Config", () => {
@@ -41,7 +40,7 @@ describe("Gumroad Config", () => {
       expect(keys).toContain("one_time_revenue");
       expect(keys).toContain("sales_count");
       expect(keys).toContain("products_count");
-      expect(keys).toContain("active_subscribers");
+      expect(keys).toContain("active_subscriptions");
     });
 
     it("should format revenue metrics as currency", () => {
@@ -61,7 +60,7 @@ describe("Gumroad Config", () => {
       expect(sales?.format).toBe("number");
 
       const subs = gumroadMetricTypes.find(
-        (m) => m.key === "active_subscribers"
+        (m) => m.key === "active_subscriptions"
       );
       expect(subs?.format).toBe("number");
     });
@@ -90,19 +89,5 @@ describe("Gumroad Config", () => {
     });
   });
 
-  describe("widgets", () => {
-    it("should define widget IDs prefixed with gumroad_", () => {
-      for (const widget of gumroadWidgets) {
-        expect(widget.id).toMatch(/^gumroad_/);
-      }
-    });
 
-    it("should include revenue, sales, and subscribers widgets", () => {
-      const ids = gumroadWidgets.map((w) => w.id);
-      expect(ids).toContain("gumroad_revenue_card");
-      expect(ids).toContain("gumroad_sales_card");
-      expect(ids).toContain("gumroad_subscribers_card");
-      expect(ids).toContain("gumroad_revenue_chart");
-    });
-  });
 });

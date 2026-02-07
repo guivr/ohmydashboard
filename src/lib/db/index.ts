@@ -136,7 +136,10 @@ function initializeDatabase(sqlite: Database.Database) {
     CREATE INDEX IF NOT EXISTS idx_metrics_date ON metrics(date);
     CREATE INDEX IF NOT EXISTS idx_metrics_type ON metrics(metric_type);
     CREATE INDEX IF NOT EXISTS idx_metrics_account_date ON metrics(account_id, date);
+    CREATE INDEX IF NOT EXISTS idx_metrics_dedup ON metrics(account_id, metric_type, date, project_id);
+    CREATE INDEX IF NOT EXISTS idx_metrics_project_id ON metrics(project_id);
     CREATE INDEX IF NOT EXISTS idx_sync_logs_account ON sync_logs(account_id);
+    CREATE INDEX IF NOT EXISTS idx_sync_logs_account_status ON sync_logs(account_id, status, started_at);
     CREATE INDEX IF NOT EXISTS idx_projects_account ON projects(account_id);
   `);
 }

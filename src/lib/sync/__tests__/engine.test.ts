@@ -52,7 +52,6 @@ function createMockIntegration(
         })),
       validateCredentials: async () => true,
     },
-    widgets: [],
     ...rest,
   };
 }

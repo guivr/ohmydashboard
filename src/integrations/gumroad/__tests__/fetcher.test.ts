@@ -345,14 +345,14 @@ describe("Gumroad Fetcher", () => {
 
     // ── Subscribers ──────────────────────────────────────────────────────
 
-    it("should produce per-product active_subscribers with projectId", async () => {
+    it("should produce per-product active_subscriptions with projectId", async () => {
       const result = await gumroadFetcher.sync(
         mockAccount,
         new Date("2026-01-01")
       );
 
       const perProductSubs = result.metrics.filter(
-        (m) => m.metricType === "active_subscribers" && m.projectId
+        (m) => m.metricType === "active_subscriptions" && m.projectId
       );
 
       // Only prod_sub is a membership product
@@ -365,14 +365,14 @@ describe("Gumroad Fetcher", () => {
       );
     });
 
-    it("should produce account-level total active_subscribers", async () => {
+    it("should produce account-level total active_subscriptions", async () => {
       const result = await gumroadFetcher.sync(
         mockAccount,
         new Date("2026-01-01")
       );
 
       const totalSubs = result.metrics.filter(
-        (m) => m.metricType === "active_subscribers" && !m.projectId
+        (m) => m.metricType === "active_subscriptions" && !m.projectId
       );
 
       expect(totalSubs).toHaveLength(1);

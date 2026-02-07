@@ -5,7 +5,6 @@ import {
   stripeCredentials,
   stripeMetricTypes,
   stripePermissions,
-  stripeWidgets,
 } from "../config";
 
 describe("Stripe Config", () => {
@@ -36,13 +35,6 @@ describe("Stripe Config", () => {
     expect(metricKeys).toContain("new_customers");
     expect(metricKeys).toContain("charges_count");
     expect(metricKeys).toContain("refunds");
-  });
-
-  it("should have widgets for key metrics", () => {
-    const widgetIds = stripeWidgets.map((w) => w.id);
-    expect(widgetIds).toContain("stripe_revenue_card");
-    expect(widgetIds).toContain("stripe_mrr_card");
-    expect(widgetIds).toContain("stripe_revenue_chart");
   });
 
   it("should declare required permissions for all accessed resources", () => {

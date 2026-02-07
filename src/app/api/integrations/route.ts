@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
-import { accounts } from "@/lib/db/schema";
+import { accounts, projects } from "@/lib/db/schema";
 import {
   getAllIntegrations,
   getIntegration,
@@ -34,6 +34,7 @@ export async function GET() {
   const db = getDb();
   const allIntegrations = getAllIntegrations();
   const allAccounts = db.select().from(accounts).all();
+  const allProjects = db.select().from(projects).all();
 
   const result = allIntegrations.map((integration) => ({
     id: integration.id,
@@ -51,6 +52,13 @@ export async function GET() {
         label: a.label,
         isActive: a.isActive,
         createdAt: a.createdAt,
+        // Include products (projects) for this account
+        products: allProjects
+          .filter((p) => p.accountId === a.id)
+          .map((p) => ({
+            id: p.id,
+            label: p.label,
+          })),
       })),
   }));
 

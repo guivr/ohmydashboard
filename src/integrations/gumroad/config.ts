@@ -2,7 +2,6 @@ import type {
   CredentialField,
   MetricTypeDefinition,
   RequiredPermission,
-  WidgetDefinition,
 } from "../types";
 
 export const GUMROAD_ID = "gumroad";
@@ -86,47 +85,11 @@ export const gumroadMetricTypes: MetricTypeDefinition[] = [
     description: "Number of published products",
   },
   {
-    key: "active_subscribers",
+    key: "active_subscriptions",
     label: "Active Subscribers",
     format: "number",
     description: "Number of currently active subscribers across all membership products",
   },
 ];
 
-export const gumroadWidgets: WidgetDefinition[] = [
-  {
-    id: "gumroad_revenue_card",
-    name: "Revenue",
-    description: "Total revenue from Gumroad sales",
-    defaultSize: "sm",
-    supportedMetricTypes: ["revenue"],
-  },
-  {
-    id: "gumroad_sales_card",
-    name: "Sales",
-    description: "Number of sales",
-    defaultSize: "sm",
-    supportedMetricTypes: ["sales_count"],
-  },
-  {
-    id: "gumroad_revenue_chart",
-    name: "Revenue Over Time",
-    description: "Revenue trend chart",
-    defaultSize: "lg",
-    supportedMetricTypes: ["revenue"],
-  },
-  {
-    id: "gumroad_subscribers_card",
-    name: "Active Subscribers",
-    description: "Current active subscriber count",
-    defaultSize: "sm",
-    supportedMetricTypes: ["active_subscribers"],
-  },
-  {
-    id: "gumroad_products_card",
-    name: "Products",
-    description: "Published product count",
-    defaultSize: "sm",
-    supportedMetricTypes: ["products_count"],
-  },
-];
+

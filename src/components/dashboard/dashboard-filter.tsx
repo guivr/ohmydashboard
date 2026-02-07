@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
+  ChevronRight,
   Check,
   Minus,
 } from "lucide-react";
@@ -11,10 +12,16 @@ import { cn } from "@/lib/utils";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
+interface ProductInfo {
+  id: string;
+  label: string;
+}
+
 interface AccountInfo {
   id: string;
   label: string;
   isActive: boolean;
+  products?: ProductInfo[];
 }
 
 interface IntegrationInfo {
@@ -29,20 +36,22 @@ interface DashboardFilterProps {
   integrations: IntegrationInfo[];
   /** Set of currently enabled account IDs */
   enabledAccountIds: Set<string>;
-  /** Called when the enabled set changes */
-  onFilterChange: (accountIds: Set<string>) => void;
+  /** Set of currently enabled project/product IDs */
+  enabledProjectIds: Set<string>;
+  /** Called when the enabled sets change */
+  onFilterChange: (accountIds: Set<string>, projectIds: Set<string>) => void;
 }
-
-
 
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export function DashboardFilter({
   integrations,
   enabledAccountIds,
+  enabledProjectIds,
   onFilterChange,
 }: DashboardFilterProps) {
   const [openIntegration, setOpenIntegration] = useState<string | null>(null);
+  const [expandedAccounts, setExpandedAccounts] = useState<Set<string>>(new Set());
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Only show integrations that have connected accounts
@@ -64,27 +73,74 @@ export function DashboardFilter({
 
   if (connected.length === 0) return null;
 
-  const enableAll = (integration: IntegrationInfo) => {
-    const next = new Set(enabledAccountIds);
-    integration.accounts.forEach((a) => next.add(a.id));
-    onFilterChange(next);
-  };
+  // ─── Account toggle helpers ──────────────────────────────────────────────
 
-  const disableAll = (integration: IntegrationInfo) => {
-    const next = new Set(enabledAccountIds);
-    integration.accounts.forEach((a) => next.delete(a.id));
-    onFilterChange(next);
-  };
-
-  const toggleAccount = (accountId: string) => {
-    const next = new Set(enabledAccountIds);
-    if (next.has(accountId)) {
-      next.delete(accountId);
-    } else {
-      next.add(accountId);
+  const enableAllAccounts = (integration: IntegrationInfo) => {
+    const nextAccounts = new Set(enabledAccountIds);
+    const nextProjects = new Set(enabledProjectIds);
+    for (const a of integration.accounts) {
+      nextAccounts.add(a.id);
+      for (const p of a.products ?? []) {
+        nextProjects.add(p.id);
+      }
     }
-    onFilterChange(next);
+    onFilterChange(nextAccounts, nextProjects);
   };
+
+  const disableAllAccounts = (integration: IntegrationInfo) => {
+    const nextAccounts = new Set(enabledAccountIds);
+    const nextProjects = new Set(enabledProjectIds);
+    for (const a of integration.accounts) {
+      nextAccounts.delete(a.id);
+      for (const p of a.products ?? []) {
+        nextProjects.delete(p.id);
+      }
+    }
+    onFilterChange(nextAccounts, nextProjects);
+  };
+
+  const toggleAccount = (account: AccountInfo) => {
+    const nextAccounts = new Set(enabledAccountIds);
+    const nextProjects = new Set(enabledProjectIds);
+    if (nextAccounts.has(account.id)) {
+      nextAccounts.delete(account.id);
+      // Also disable all products for this account
+      for (const p of account.products ?? []) {
+        nextProjects.delete(p.id);
+      }
+    } else {
+      nextAccounts.add(account.id);
+      // Also enable all products for this account
+      for (const p of account.products ?? []) {
+        nextProjects.add(p.id);
+      }
+    }
+    onFilterChange(nextAccounts, nextProjects);
+  };
+
+  const toggleProduct = (product: ProductInfo) => {
+    const nextProjects = new Set(enabledProjectIds);
+    if (nextProjects.has(product.id)) {
+      nextProjects.delete(product.id);
+    } else {
+      nextProjects.add(product.id);
+    }
+    onFilterChange(new Set(enabledAccountIds), nextProjects);
+  };
+
+  const toggleAccountExpanded = (accountId: string) => {
+    setExpandedAccounts((prev) => {
+      const next = new Set(prev);
+      if (next.has(accountId)) {
+        next.delete(accountId);
+      } else {
+        next.add(accountId);
+      }
+      return next;
+    });
+  };
+
+  // ─── Render ──────────────────────────────────────────────────────────────
 
   return (
     <div className="flex flex-wrap items-start gap-2" ref={dropdownRef}>
@@ -102,10 +158,14 @@ export function DashboardFilter({
         const someEnabled = enabledCount > 0 && !allEnabled;
         const isOpen = openIntegration === integration.id;
         const accountCount = integration.accounts.length;
+        const totalProducts = integration.accounts.reduce(
+          (sum, a) => sum + (a.products?.length ?? 0),
+          0
+        );
 
         return (
           <div key={integration.id} className="relative">
-            {/* Integration pill — always opens dropdown on click */}
+            {/* Integration pill */}
             <button
               type="button"
               onClick={() =>
@@ -143,14 +203,14 @@ export function DashboardFilter({
 
             {/* Dropdown */}
             {isOpen && (
-              <div className="absolute left-0 top-full z-10 mt-1 min-w-52 rounded-lg border border-border bg-card p-1 shadow-lg">
+              <div className="absolute left-0 top-full z-10 mt-1 min-w-64 rounded-lg border border-border bg-card p-1 shadow-lg">
                 {/* Toggle all */}
                 <button
                   type="button"
                   onClick={() =>
                     allEnabled
-                      ? disableAll(integration)
-                      : enableAll(integration)
+                      ? disableAllAccounts(integration)
+                      : enableAllAccounts(integration)
                   }
                   className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-xs font-medium text-foreground hover:bg-accent"
                 >
@@ -177,42 +237,124 @@ export function DashboardFilter({
 
                 <div className="my-1 h-px bg-border" />
 
-                {/* Individual accounts */}
+                {/* Individual accounts + nested products */}
                 {integration.accounts.map((account) => {
-                  const isEnabled = enabledAccountIds.has(account.id);
+                  const isAccountEnabled = enabledAccountIds.has(account.id);
+                  const products = account.products ?? [];
+                  const hasProducts = products.length > 0;
+                  const isExpanded = expandedAccounts.has(account.id);
+                  const enabledProductCount = products.filter((p) =>
+                    enabledProjectIds.has(p.id)
+                  ).length;
+                  const allProductsEnabled = hasProducts && enabledProductCount === products.length;
+                  const someProductsEnabled = enabledProductCount > 0 && !allProductsEnabled;
+
                   return (
-                    <button
-                      key={account.id}
-                      type="button"
-                      onClick={() => toggleAccount(account.id)}
-                      className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-xs hover:bg-accent"
-                    >
-                      <span
-                        className={cn(
-                          "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
-                          isEnabled
-                            ? "border-transparent text-white"
-                            : "border-border"
+                    <div key={account.id}>
+                      <div className="flex items-center">
+                        {/* Expand chevron (only if products exist) */}
+                        {hasProducts ? (
+                          <button
+                            type="button"
+                            onClick={() => toggleAccountExpanded(account.id)}
+                            className="flex h-6 w-5 shrink-0 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                          >
+                            <ChevronRight
+                              className={cn(
+                                "h-3 w-3 transition-transform",
+                                isExpanded && "rotate-90"
+                              )}
+                            />
+                          </button>
+                        ) : (
+                          <span className="w-5 shrink-0" />
                         )}
-                        style={
-                          isEnabled
-                            ? { backgroundColor: integration.color }
-                            : undefined
-                        }
-                      >
-                        {isEnabled && <Check className="h-3 w-3" />}
-                      </span>
-                      <span
-                        className={cn(
-                          "truncate",
-                          isEnabled
-                            ? "text-foreground"
-                            : "text-muted-foreground"
-                        )}
-                      >
-                        {account.label}
-                      </span>
-                    </button>
+
+                        {/* Account toggle */}
+                        <button
+                          type="button"
+                          onClick={() => toggleAccount(account)}
+                          className="flex flex-1 items-center gap-2 rounded-md px-1.5 py-1.5 text-xs hover:bg-accent"
+                        >
+                          <span
+                            className={cn(
+                              "flex h-4 w-4 shrink-0 items-center justify-center rounded border",
+                              isAccountEnabled
+                                ? "border-transparent text-white"
+                                : "border-border"
+                            )}
+                            style={
+                              isAccountEnabled
+                                ? { backgroundColor: integration.color }
+                                : undefined
+                            }
+                          >
+                            {isAccountEnabled && <Check className="h-3 w-3" />}
+                          </span>
+                          <span
+                            className={cn(
+                              "truncate",
+                              isAccountEnabled
+                                ? "text-foreground"
+                                : "text-muted-foreground"
+                            )}
+                          >
+                            {account.label}
+                          </span>
+                          {hasProducts && (
+                            <span className="ml-auto text-[10px] text-muted-foreground">
+                              {someProductsEnabled
+                                ? `${enabledProductCount}/${products.length}`
+                                : products.length}{" "}
+                              {products.length === 1 ? "product" : "products"}
+                            </span>
+                          )}
+                        </button>
+                      </div>
+
+                      {/* Nested products */}
+                      {hasProducts && isExpanded && (
+                        <div className="ml-5 border-l border-border/50 pl-2">
+                          {products.map((product) => {
+                            const isProductEnabled = enabledProjectIds.has(product.id);
+                            return (
+                              <button
+                                key={product.id}
+                                type="button"
+                                onClick={() => toggleProduct(product)}
+                                className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-[11px] hover:bg-accent"
+                              >
+                                <span
+                                  className={cn(
+                                    "flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border",
+                                    isProductEnabled
+                                      ? "border-transparent text-white"
+                                      : "border-border"
+                                  )}
+                                  style={
+                                    isProductEnabled
+                                      ? { backgroundColor: integration.color }
+                                      : undefined
+                                  }
+                                >
+                                  {isProductEnabled && <Check className="h-2.5 w-2.5" />}
+                                </span>
+                                <span
+                                  className={cn(
+                                    "truncate",
+                                    isProductEnabled
+                                      ? "text-foreground"
+                                      : "text-muted-foreground"
+                                  )}
+                                >
+                                  {product.label}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   );
                 })}
               </div>
