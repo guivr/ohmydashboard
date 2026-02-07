@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -222,25 +222,23 @@ function GroupFormDialog({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset form when dialog opens
-  const handleOpenChange = (next: boolean) => {
-    if (next) {
-      if (editingGroup) {
-        setName(editingGroup.name);
-        setSelectedMembers(
-          editingGroup.members.map((m) => ({
-            accountId: m.accountId,
-            projectId: m.projectId,
-          }))
-        );
-      } else {
-        setName("");
-        setSelectedMembers([]);
-      }
-      setError(null);
+  // Reset form when dialog opens (also when switching between create/edit)
+  useEffect(() => {
+    if (!open) return;
+    if (editingGroup) {
+      setName(editingGroup.name);
+      setSelectedMembers(
+        editingGroup.members.map((m) => ({
+          accountId: m.accountId,
+          projectId: m.projectId,
+        }))
+      );
+    } else {
+      setName("");
+      setSelectedMembers([]);
     }
-    onOpenChange(next);
-  };
+    setError(null);
+  }, [open, editingGroup]);
 
   const toggleMember = (accountId: string, projectId: string | null) => {
     setSelectedMembers((prev) => {
@@ -315,7 +313,7 @@ function GroupFormDialog({
   );
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
         <form onSubmit={handleSubmit}>
           <DialogHeader>

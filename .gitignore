@@ -45,6 +45,3 @@ next-env.d.ts
 
 # agent data
 .agents/
-
-# local API specs
-revenuecatopenapi.yaml
