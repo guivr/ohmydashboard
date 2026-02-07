@@ -139,6 +139,11 @@ html.appearance-business .business-square {
   border-radius: 0 !important;
 }
 
+html.appearance-business [data-slot="card"] {
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
 
 html.appearance-rounded :where(
   [data-slot="card"],

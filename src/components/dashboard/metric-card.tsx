@@ -537,23 +537,26 @@ export function MetricCard({
                   const isExpanded = expandedGroups.has(entry.label);
 
                   return (
-                    <div key={entry.label + i}>
+                    <div
+                      key={entry.label + i}
+                      className={cn("rounded-md", hasChildren && "cursor-pointer")}
+                      onClick={hasChildren ? () => {
+                        setExpandedGroups((prev) => {
+                          const next = new Set(prev);
+                          if (next.has(entry.label)) {
+                            next.delete(entry.label);
+                          } else {
+                            next.add(entry.label);
+                          }
+                          return next;
+                        });
+                      } : undefined}
+                    >
                       <div
                         className={cn(
-                          "mb-1.5 flex items-center justify-between gap-2",
+                          "mb-1.5 flex items-center justify-between gap-2 px-1.5",
                           hasChildren && "cursor-pointer"
                         )}
-                        onClick={hasChildren ? () => {
-                          setExpandedGroups((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(entry.label)) {
-                              next.delete(entry.label);
-                            } else {
-                              next.add(entry.label);
-                            }
-                            return next;
-                          });
-                        } : undefined}
                       >
                         <div className="flex min-w-0 items-center gap-2">
                           <span
@@ -620,7 +623,7 @@ export function MetricCard({
                         </span>
                       </div>
 
-                      <div className="business-square relative h-2 w-full overflow-hidden rounded-full bg-muted/60">
+                      <div className="business-square relative h-2 w-full overflow-hidden rounded-full bg-muted/60 px-1.5">
                         <div
                           className={cn(
                             "business-square absolute inset-y-0 left-0 rounded-full",
@@ -633,7 +636,7 @@ export function MetricCard({
                         />
                       </div>
 
-                      <div className="mt-0.5 text-right">
+                      <div className="mt-0.5 px-1.5 text-right">
                         <span
                           className={cn(
                             "text-[10px] tabular-nums",
@@ -648,7 +651,10 @@ export function MetricCard({
 
                       {/* ─── Sub-breakdown for project groups ──────────── */}
                       {hasChildren && isExpanded && (
-                        <div className="mt-2 ml-7 space-y-2 border-l-2 border-border pl-3">
+                        <div
+                          className="mt-2 ml-7 space-y-2 border-l-2 border-border pl-3 cursor-auto"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           {entry.children!.map((child, ci) => (
                             <div key={child.label + ci}>
                               <div className="mb-1 flex items-center justify-between gap-2">
