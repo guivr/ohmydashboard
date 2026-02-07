@@ -116,6 +116,49 @@
   --sidebar-ring: oklch(0.552 0.016 285.938);
 }
 
+html.appearance-rounded {
+  --font-sans: var(--font-open-runde);
+  --radius: 1rem;
+}
+
+html.appearance-rounded body {
+  font-family: var(--font-open-runde);
+}
+
+html.appearance-modern {
+  --font-sans: var(--font-geist-sans);
+  --radius: 0.625rem;
+}
+
+html.appearance-business {
+  --font-sans: var(--font-geist-sans);
+  --radius: 0rem;
+}
+
+html.appearance-business .business-square {
+  border-radius: 0 !important;
+}
+
+
+html.appearance-rounded :where(
+  [data-slot="card"],
+  [data-slot="input"],
+  [data-slot="button"],
+  [data-slot="select-trigger"],
+  [data-slot="select-content"],
+  [data-slot="badge"],
+  [data-slot="dialog-content"],
+  [data-slot="popover-content"],
+  .rounded-md,
+  .rounded-lg,
+  .rounded-xl,
+  .rounded-2xl
+) {
+  border-radius: 1rem;
+}
+
+
+
 @layer base {
   * {
     @apply border-border outline-ring/50;

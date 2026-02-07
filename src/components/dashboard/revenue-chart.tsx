@@ -69,6 +69,26 @@ function useResolvedColors(ref: React.RefObject<HTMLElement | null>) {
   return colors;
 }
 
+function useAppearance(): "rounded" | "modern" | "business" {
+  const [appearance, setAppearance] = useState<"rounded" | "modern" | "business">("modern");
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const read = () => {
+      if (root.classList.contains("appearance-rounded")) return "rounded";
+      if (root.classList.contains("appearance-business")) return "business";
+      return "modern";
+    };
+    setAppearance(read());
+
+    const observer = new MutationObserver(() => setAppearance(read()));
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+
+  return appearance;
+}
+
 /**
  * Format a timestamp to a short date label for axis ticks.
  */
@@ -102,6 +122,7 @@ export function RevenueChart({
 }: RevenueChartProps) {
   const cardRef = useRef<HTMLDivElement>(null);
   const resolved = useResolvedColors(cardRef);
+  const appearance = useAppearance();
   const chartColor = color ?? resolved.chart;
 
   // Fill in missing dates with zeros to create a continuous time series.
@@ -169,6 +190,7 @@ export function RevenueChart({
                 strokeDasharray="3 3"
                 stroke={resolved.grid}
                 vertical={false}
+                strokeLinecap={appearance === "rounded" ? "round" : "butt"}
               />
               <XAxis
                 dataKey="timestamp"
@@ -235,14 +257,14 @@ export function RevenueChart({
                 }}
               />
               <Area
-                type="linear"
+                type={appearance === "rounded" ? "monotone" : "linear"}
                 dataKey="value"
                 stroke={chartColor}
                 strokeWidth={2}
                 fill="url(#revenueGradient)"
                 dot={false}
                 activeDot={{
-                  r: 4,
+                  r: appearance === "rounded" ? 6 : 4,
                   fill: chartColor,
                   stroke: resolved.card,
                   strokeWidth: 2,

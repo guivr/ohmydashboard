@@ -138,6 +138,26 @@ function useResolvedChartColors(ref: React.RefObject<HTMLElement | null>) {
   return colors;
 }
 
+function useAppearance(): "rounded" | "modern" | "business" {
+  const [appearance, setAppearance] = useState<"rounded" | "modern" | "business">("modern");
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const read = () => {
+      if (root.classList.contains("appearance-rounded")) return "rounded";
+      if (root.classList.contains("appearance-business")) return "business";
+      return "modern";
+    };
+    setAppearance(read());
+
+    const observer = new MutationObserver(() => setAppearance(read()));
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+
+  return appearance;
+}
+
 function formatTickDate(timestamp: number): string {
   const date = new Date(timestamp);
   return new Intl.DateTimeFormat("en-US", {
@@ -180,6 +200,7 @@ export function MetricCard({
   const [calcOpen, setCalcOpen] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const resolved = useResolvedChartColors(cardRef);
+  const appearance = useAppearance();
   const lineColor = chartColor ?? resolved.chart;
 
   // Fill in missing dates with zeros for a continuous time series
@@ -274,7 +295,7 @@ export function MetricCard({
                   <button
                     type="button"
                     onClick={() => setCalcOpen(true)}
-                    className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground/60 transition hover:bg-muted-foreground/20 hover:text-foreground"
+                    className="business-square inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground/60 transition hover:bg-muted-foreground/20 hover:text-foreground"
                     aria-label="View calculation"
                   >
                     <Info className="h-2.5 w-2.5" />
@@ -305,7 +326,7 @@ export function MetricCard({
                 <div className="mt-3 flex items-center gap-1.5">
                   <span
                     className={cn(
-                      "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                      "business-square inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
                       MEDAL_STYLES[0]
                     )}
                   >
@@ -360,6 +381,7 @@ export function MetricCard({
                     strokeDasharray="3 3"
                     stroke={resolved.grid}
                     vertical={false}
+                    strokeLinecap={appearance === "rounded" ? "round" : "butt"}
                   />
                   <XAxis
                     dataKey="timestamp"
@@ -467,14 +489,14 @@ export function MetricCard({
                     }}
                   />
                   <Area
-                    type="linear"
+                    type={appearance === "rounded" ? "monotone" : "linear"}
                     dataKey="value"
                     stroke={lineColor}
                     strokeWidth={2}
                     fill={`url(#grad-${chartId ?? "chart"})`}
                     dot={false}
                     activeDot={{
-                      r: 4,
+                      r: appearance === "rounded" ? 6 : 4,
                       fill: lineColor,
                       stroke: resolved.card,
                       strokeWidth: 2,
@@ -488,8 +510,8 @@ export function MetricCard({
             <Skeleton className="mt-6 h-[200px] w-full" />
           )}
         </CardContent>
-        {/* ─── Collapsible ranking breakdown ──────────────────────────── */}
-        {!loading && hasRanking && (
+          {/* ─── Collapsible ranking breakdown ──────────────────────────── */}
+          {!loading && hasRanking && (
           <CardContent className="pt-0">
             <button
               type="button"
@@ -536,7 +558,7 @@ export function MetricCard({
                         <div className="flex min-w-0 items-center gap-2">
                           <span
                             className={cn(
-                              "inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-bold",
+                              "business-square inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-bold",
                               medalStyle ?? "bg-muted text-muted-foreground"
                             )}
                           >
@@ -598,10 +620,10 @@ export function MetricCard({
                         </span>
                       </div>
 
-                      <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted/60">
+                      <div className="business-square relative h-2 w-full overflow-hidden rounded-full bg-muted/60">
                         <div
                           className={cn(
-                            "absolute inset-y-0 left-0 rounded-full",
+                            "business-square absolute inset-y-0 left-0 rounded-full",
                             barColor,
                             i === 0 ? "opacity-100" : "opacity-75"
                           )}
@@ -651,10 +673,10 @@ export function MetricCard({
                                   {formatRankingValue(child.value, format, currency)}
                                 </span>
                               </div>
-                              <div className="relative h-1.5 w-full overflow-hidden rounded-full bg-muted/40">
+                              <div className="business-square relative h-1.5 w-full overflow-hidden rounded-full bg-muted/40">
                                 <div
                                   className={cn(
-                                    "absolute inset-y-0 left-0 rounded-full opacity-60",
+                                    "business-square absolute inset-y-0 left-0 rounded-full opacity-60",
                                     barColor
                                   )}
                                   style={{

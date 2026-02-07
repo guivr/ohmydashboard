@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { useIntegrations, useProjectGroups } from "@/hooks/use-metrics";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AddAccountDialog } from "@/components/settings/add-account-dialog";
@@ -8,10 +9,34 @@ import { Separator } from "@/components/ui/separator";
 import { apiDelete, apiPatch, apiPost } from "@/lib/api-client";
 import { IntegrationLogo } from "@/components/integration-logo";
 import { ProjectGroupsManager } from "@/components/settings/project-groups-manager";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  applyAppearanceToRoot,
+  APPEARANCE_STORAGE_KEY,
+  getAppearanceFromRoot,
+  migrateLegacyFontPreference,
+  migrateLegacyTerminalPreference,
+  normalizeAppearance,
+  type Appearance,
+} from "@/lib/appearance";
 
 export default function SettingsPage() {
   const { data: integrations, loading, refetch } = useIntegrations();
   const { data: projectGroups, loading: groupsLoading, refetch: refetchGroups } = useProjectGroups();
+  const [appearance, setAppearance] = useState<Appearance>(() => {
+    if (typeof window === "undefined") return "modern";
+    migrateLegacyFontPreference();
+    migrateLegacyTerminalPreference();
+    const storedRaw = localStorage.getItem(APPEARANCE_STORAGE_KEY);
+    if (storedRaw) return normalizeAppearance(storedRaw);
+    return getAppearanceFromRoot(document.documentElement);
+  });
 
   const handleDelete = async (accountId: string) => {
     if (!confirm("Are you sure you want to delete this account? This will remove all associated data.")) {
@@ -30,6 +55,32 @@ export default function SettingsPage() {
   const handleSync = async (accountId: string) => {
     await apiPost("/api/sync", { accountId });
   };
+
+  useEffect(() => {
+    applyAppearanceToRoot(document.documentElement, appearance);
+    localStorage.setItem(APPEARANCE_STORAGE_KEY, appearance);
+  }, [appearance]);
+
+  useEffect(() => {
+    const syncFromStorage = () => {
+      const storedRaw = localStorage.getItem(APPEARANCE_STORAGE_KEY);
+      const stored = storedRaw
+        ? normalizeAppearance(storedRaw)
+        : getAppearanceFromRoot(document.documentElement);
+      setAppearance(stored);
+    };
+
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === APPEARANCE_STORAGE_KEY) {
+        syncFromStorage();
+      }
+    };
+
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
 
   return (
     <div className="p-6 lg:p-8">
@@ -132,6 +183,38 @@ export default function SettingsPage() {
                 />
               </div>
             )}
+
+            <div className="space-y-4">
+              <div>
+                <h2 className="text-lg font-semibold">Appearance</h2>
+                <p className="text-sm text-muted-foreground">
+                  Choose a UI style preset.
+                </p>
+              </div>
+              <Card className="max-w-md">
+                <CardContent className="flex items-center justify-between gap-4 py-4">
+                  <div>
+                    <div className="text-sm font-medium">Theme</div>
+                    <div className="text-xs text-muted-foreground">
+                      Typography and corner treatment
+                    </div>
+                  </div>
+                  <Select
+                    value={appearance}
+                    onValueChange={(value) => setAppearance(value as Appearance)}
+                  >
+                    <SelectTrigger className="w-[180px]">
+                      <SelectValue placeholder="Select style" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="rounded">Rounded</SelectItem>
+                      <SelectItem value="modern">Modern</SelectItem>
+                      <SelectItem value="business">Business</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </CardContent>
+              </Card>
+            </div>
 
             <div className="space-y-4">
               <h2 className="text-lg font-semibold text-muted-foreground">
