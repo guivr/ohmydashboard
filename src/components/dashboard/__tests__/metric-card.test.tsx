@@ -299,6 +299,44 @@ describe("MetricCard", () => {
     vi.useRealTimers();
   });
 
+  it("should use custom rankingLabel in dropdown header", () => {
+    vi.useFakeTimers();
+
+    render(
+      <MetricCard
+        title="Revenue"
+        value={1500}
+        format="currency"
+        ranking={multiRanking}
+        rankingLabel="Product leaderboard"
+      />
+    );
+
+    const card = screen.getByText("Revenue").closest("[class*='card']")!;
+    fireEvent.click(card);
+    act(() => { vi.advanceTimersByTime(100); });
+
+    expect(screen.getByText("Product leaderboard")).toBeInTheDocument();
+    expect(screen.queryByText("Source leaderboard")).not.toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
+
+  it("should show change indicator with description when previousValue is provided", () => {
+    render(
+      <MetricCard
+        title="Revenue"
+        value={150}
+        previousValue={100}
+        format="currency"
+        description="vs previous 30 days"
+      />
+    );
+
+    expect(screen.getByText("+50.0%")).toBeInTheDocument();
+    expect(screen.getByText("vs previous 30 days")).toBeInTheDocument();
+  });
+
   // ─── Loading / skeleton tests ───────────────────────────────────────────────
 
   it("should show skeleton shimmer when loading", () => {

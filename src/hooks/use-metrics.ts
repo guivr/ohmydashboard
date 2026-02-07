@@ -30,6 +30,10 @@ interface UseMetricsOptions {
   /** Filter by multiple account IDs. Takes precedence over accountId. */
   accountIds?: string[];
   metricType?: string;
+  /** Filter by project/product ID */
+  projectId?: string;
+  /** "true" for per-project only, "false" for account-level only */
+  withProject?: "true" | "false";
   from?: string;
   to?: string;
   aggregation?: "daily" | "total";
@@ -57,6 +61,8 @@ export function useMetrics(options: UseMetricsOptions = {}) {
         params.set("accountId", options.accountId);
       }
       if (options.metricType) params.set("metricType", options.metricType);
+      if (options.projectId) params.set("projectId", options.projectId);
+      if (options.withProject) params.set("withProject", options.withProject);
       if (options.from) params.set("from", options.from);
       if (options.to) params.set("to", options.to);
       if (options.aggregation) params.set("aggregation", options.aggregation);
@@ -74,6 +80,8 @@ export function useMetrics(options: UseMetricsOptions = {}) {
     accountIdsKey,
     options.accountId,
     options.metricType,
+    options.projectId,
+    options.withProject,
     options.from,
     options.to,
     options.aggregation,

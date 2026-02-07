@@ -24,6 +24,8 @@ interface MetricCardProps {
   icon?: React.ReactNode;
   description?: string;
   ranking?: RankingEntry[];
+  /** Custom label for the ranking dropdown header (default: "Source leaderboard") */
+  rankingLabel?: string;
   /** Show skeleton shimmer instead of real data */
   loading?: boolean;
 }
@@ -66,6 +68,7 @@ export function MetricCard({
   icon,
   description,
   ranking,
+  rankingLabel = "Source leaderboard",
   loading = false,
 }: MetricCardProps) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
@@ -196,7 +199,7 @@ export function MetricCard({
           <div className="mb-3 flex items-center gap-1.5">
             <Trophy className="h-3.5 w-3.5 text-muted-foreground/70" />
             <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground/70">
-              Source leaderboard
+              {rankingLabel}
             </span>
           </div>
 
