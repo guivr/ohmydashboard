@@ -1,7 +1,7 @@
 import type { BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { accounts, metrics, syncLogs } from "../db/schema";
+import { accounts, metrics, projects, syncLogs } from "../db/schema";
 import type * as schema from "../db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { getIntegration } from "../../integrations/registry";
 import type { NormalizedMetric, SyncStep } from "../../integrations/types";
 import { getDb } from "../db";
@@ -185,9 +185,46 @@ export async function syncAccount(
 }
 
 /**
+ * Ensure a project row exists for a given (accountId, projectId) pair.
+ * Auto-creates with the label from metric metadata if missing.
+ * Returns the projectId for FK use.
+ */
+function ensureProject(
+  db: Db,
+  accountId: string,
+  projectId: string,
+  label?: string
+): string {
+  const existing = db
+    .select()
+    .from(projects)
+    .where(eq(projects.id, projectId))
+    .get();
+
+  if (!existing) {
+    const now = new Date().toISOString();
+    db.insert(projects)
+      .values({
+        id: projectId,
+        accountId,
+        label: label || projectId,
+        filters: "{}",
+        createdAt: now,
+        updatedAt: now,
+      })
+      .run();
+  }
+
+  return projectId;
+}
+
+/**
  * Store normalized metrics in the database.
- * Uses upsert logic — for the same account + metric_type + date,
+ * Uses upsert logic — for the same account + metric_type + date + project,
  * the most recent value wins.
+ *
+ * When a metric has a projectId, the dedup key includes it so that
+ * per-product metrics don't collide with each other or with account-level totals.
  */
 function storeMetrics(
   db: Db,
@@ -197,17 +234,33 @@ function storeMetrics(
   const now = new Date().toISOString();
 
   for (const metric of newMetrics) {
-    // Check if we already have this metric for this account + type + date
+    // Auto-create project if the metric references one
+    let resolvedProjectId: string | null = null;
+    if (metric.projectId) {
+      resolvedProjectId = ensureProject(
+        db,
+        accountId,
+        metric.projectId,
+        metric.metadata?.product_name
+      );
+    }
+
+    // Build dedup conditions — projectId is part of the key
+    const conditions = [
+      eq(metrics.accountId, accountId),
+      eq(metrics.metricType, metric.metricType),
+      eq(metrics.date, metric.date),
+    ];
+    if (resolvedProjectId) {
+      conditions.push(eq(metrics.projectId, resolvedProjectId));
+    } else {
+      conditions.push(isNull(metrics.projectId));
+    }
+
     const existing = db
       .select()
       .from(metrics)
-      .where(
-        and(
-          eq(metrics.accountId, accountId),
-          eq(metrics.metricType, metric.metricType),
-          eq(metrics.date, metric.date)
-        )
-      )
+      .where(and(...conditions))
       .get();
 
     if (existing) {
@@ -216,6 +269,7 @@ function storeMetrics(
         .set({
           value: metric.value,
           currency: metric.currency || null,
+          projectId: resolvedProjectId,
           metadata: JSON.stringify(metric.metadata || {}),
         })
         .where(eq(metrics.id, existing.id))
@@ -226,7 +280,7 @@ function storeMetrics(
         .values({
           id: generateSecureId(),
           accountId,
-          projectId: metric.projectId || null,
+          projectId: resolvedProjectId,
           metricType: metric.metricType,
           value: metric.value,
           currency: metric.currency || null,

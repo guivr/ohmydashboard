@@ -20,8 +20,8 @@ export const gumroadCredentials: CredentialField[] = [
     placeholder: "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
     helpUrl: "https://app.gumroad.com/settings/advanced#application-form",
     helpText:
-      'Go to Settings > Advanced > Application, then click "Generate access token". ' +
-      "Use a token with the view_sales scope for full dashboard functionality.",
+      "On the Application page, click the \"Generate access token\" button and paste the token here. " +
+      "You do NOT need the Application ID or Application Secret — only the generated access token.",
     required: true,
   },
 ];
@@ -59,7 +59,19 @@ export const gumroadMetricTypes: MetricTypeDefinition[] = [
     key: "revenue",
     label: "Revenue",
     format: "currency",
-    description: "Total revenue from successful sales",
+    description: "Total revenue from successful sales (all products)",
+  },
+  {
+    key: "subscription_revenue",
+    label: "Subscription Revenue",
+    format: "currency",
+    description: "Revenue from subscription/membership products",
+  },
+  {
+    key: "one_time_revenue",
+    label: "One-Time Revenue",
+    format: "currency",
+    description: "Revenue from one-time purchase products",
   },
   {
     key: "sales_count",

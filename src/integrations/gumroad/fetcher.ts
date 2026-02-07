@@ -170,48 +170,158 @@ async function fetchSubscribers(
 
 // ─── Metric computation ──────────────────────────────────────────────────────
 
+/** Look up whether a product is a subscription or a one-time purchase. */
+function buildProductLookup(products: GumroadProduct[]): Map<string, GumroadProduct> {
+  const map = new Map<string, GumroadProduct>();
+  for (const p of products) {
+    map.set(p.id, p);
+  }
+  return map;
+}
+
 /**
- * Group sales by day to compute daily revenue and sale counts.
+ * Compute per-product daily metrics from sales.
+ *
+ * Produces for each (product, day):
+ *   - `revenue` with projectId (per-product revenue)
+ *   - `sales_count` with projectId (per-product sale count)
+ *
+ * Also produces account-level totals (no projectId):
+ *   - `revenue` (all products combined)
+ *   - `sales_count` (all products combined)
+ *   - `subscription_revenue` (subscription products only)
+ *   - `one_time_revenue` (one-time purchase products only)
+ *
  * Excludes fully refunded and chargedback sales.
  */
-function computeDailySalesMetrics(sales: GumroadSale[]): NormalizedMetric[] {
-  const dailyMap = new Map<
-    string,
-    { revenue: number; count: number }
+function computeSalesMetrics(
+  sales: GumroadSale[],
+  productLookup: Map<string, GumroadProduct>
+): NormalizedMetric[] {
+  // Per-product per-day
+  const productDayMap = new Map<
+    string, // "productId|date"
+    {
+      productId: string;
+      productName: string;
+      date: string;
+      revenue: number;
+      count: number;
+      isSubscription: boolean;
+    }
+  >();
+
+  // Account-level per-day
+  const totalDayMap = new Map<
+    string, // date
+    {
+      revenue: number;
+      count: number;
+      subscriptionRevenue: number;
+      oneTimeRevenue: number;
+    }
   >();
 
   for (const sale of sales) {
-    // Skip fully refunded or chargedback sales
     if (sale.refunded || sale.chargedback) continue;
 
     const date = format(new Date(sale.created_at), "yyyy-MM-dd");
-    const existing = dailyMap.get(date) || { revenue: 0, count: 0 };
+    const product = productLookup.get(sale.product_id);
+    const isSubscription = product?.is_tiered_membership ??
+      (sale.subscription_duration != null && sale.subscription_duration !== "");
+    const priceDollars = sale.price / 100;
 
-    // Gumroad's `price` is in cents
-    existing.revenue += sale.price / 100;
+    // Per-product
+    const key = `${sale.product_id}|${date}`;
+    const existing = productDayMap.get(key) || {
+      productId: sale.product_id,
+      productName: product?.name ?? sale.product_name,
+      date,
+      revenue: 0,
+      count: 0,
+      isSubscription,
+    };
+    existing.revenue += priceDollars;
     existing.count += 1;
+    productDayMap.set(key, existing);
 
-    dailyMap.set(date, existing);
+    // Account-level total
+    const dayTotal = totalDayMap.get(date) || {
+      revenue: 0,
+      count: 0,
+      subscriptionRevenue: 0,
+      oneTimeRevenue: 0,
+    };
+    dayTotal.revenue += priceDollars;
+    dayTotal.count += 1;
+    if (isSubscription) {
+      dayTotal.subscriptionRevenue += priceDollars;
+    } else {
+      dayTotal.oneTimeRevenue += priceDollars;
+    }
+    totalDayMap.set(date, dayTotal);
   }
 
-  const metrics: NormalizedMetric[] = [];
+  const allMetrics: NormalizedMetric[] = [];
 
-  for (const [date, data] of dailyMap) {
-    metrics.push({
+  // Per-product metrics
+  for (const data of productDayMap.values()) {
+    const productType = data.isSubscription ? "subscription" : "one_time";
+    allMetrics.push({
+      metricType: "revenue",
+      value: data.revenue,
+      currency: "USD",
+      date: data.date,
+      projectId: data.productId,
+      metadata: {
+        product_name: data.productName,
+        product_type: productType,
+      },
+    });
+    allMetrics.push({
+      metricType: "sales_count",
+      value: data.count,
+      date: data.date,
+      projectId: data.productId,
+      metadata: {
+        product_name: data.productName,
+        product_type: productType,
+      },
+    });
+  }
+
+  // Account-level totals (no projectId — these aggregate across all products)
+  for (const [date, data] of totalDayMap) {
+    allMetrics.push({
       metricType: "revenue",
       value: data.revenue,
       currency: "USD",
       date,
     });
-
-    metrics.push({
+    allMetrics.push({
       metricType: "sales_count",
       value: data.count,
       date,
     });
+    if (data.subscriptionRevenue > 0) {
+      allMetrics.push({
+        metricType: "subscription_revenue",
+        value: data.subscriptionRevenue,
+        currency: "USD",
+        date,
+      });
+    }
+    if (data.oneTimeRevenue > 0) {
+      allMetrics.push({
+        metricType: "one_time_revenue",
+        value: data.oneTimeRevenue,
+        currency: "USD",
+        date,
+      });
+    }
   }
 
-  return metrics;
+  return allMetrics;
 }
 
 /**
@@ -235,23 +345,43 @@ function computeProductsCount(
 }
 
 /**
- * Count active subscribers across all membership products.
+ * Count active subscribers per membership product, plus an account-level total.
  */
 function computeActiveSubscribers(
-  subscribers: GumroadSubscriber[],
+  subscribersByProduct: Map<string, { subscribers: GumroadSubscriber[]; productName: string }>,
   today: string
 ): NormalizedMetric[] {
-  const activeCount = subscribers.filter(
-    (s) => s.status === "alive" || s.status === "pending_cancellation"
-  ).length;
+  const allMetrics: NormalizedMetric[] = [];
+  let totalActive = 0;
 
-  return [
-    {
+  for (const [productId, { subscribers, productName }] of subscribersByProduct) {
+    const activeCount = subscribers.filter(
+      (s) => s.status === "alive" || s.status === "pending_cancellation"
+    ).length;
+
+    totalActive += activeCount;
+
+    // Per-product subscriber count
+    allMetrics.push({
       metricType: "active_subscribers",
       value: activeCount,
       date: today,
-    },
-  ];
+      projectId: productId,
+      metadata: {
+        product_name: productName,
+        product_type: "subscription",
+      },
+    });
+  }
+
+  // Account-level total
+  allMetrics.push({
+    metricType: "active_subscribers",
+    value: totalActive,
+    date: today,
+  });
+
+  return allMetrics;
 }
 
 // ─── DataFetcher implementation ──────────────────────────────────────────────
@@ -274,37 +404,13 @@ export const gumroadFetcher: DataFetcher = {
     let totalRecords = 0;
     let hasAnyError = false;
 
-    // Step 1: Fetch sales
+    // Step 1: Fetch products first (needed for sale classification)
+    let products: GumroadProduct[] = [];
+    let productLookup = new Map<string, GumroadProduct>();
     let t0 = Date.now();
     try {
-      const sales = await fetchSales(accessToken, syncSince);
-      const salesMetrics = computeDailySalesMetrics(sales);
-      allMetrics.push(...salesMetrics);
-      totalRecords += sales.length;
-      steps.push({
-        key: "fetch_sales",
-        label: "Fetch sales & revenue",
-        status: "success",
-        recordCount: sales.length,
-        durationMs: Date.now() - t0,
-      });
-    } catch (error) {
-      hasAnyError = true;
-      steps.push({
-        key: "fetch_sales",
-        label: "Fetch sales & revenue",
-        status: "error",
-        durationMs: Date.now() - t0,
-        error:
-          error instanceof Error ? error.message : "Failed to fetch sales",
-      });
-    }
-
-    // Step 2: Fetch products
-    let products: GumroadProduct[] = [];
-    t0 = Date.now();
-    try {
       products = await fetchProducts(accessToken);
+      productLookup = buildProductLookup(products);
       const productMetrics = computeProductsCount(products, today);
       allMetrics.push(...productMetrics);
       totalRecords += products.length;
@@ -329,30 +435,65 @@ export const gumroadFetcher: DataFetcher = {
       });
     }
 
-    // Step 3: Fetch subscribers (only for membership products)
+    // Step 2: Fetch sales (uses product lookup to classify subscription vs one-time)
+    t0 = Date.now();
+    try {
+      const sales = await fetchSales(accessToken, syncSince);
+      const salesMetrics = computeSalesMetrics(sales, productLookup);
+      allMetrics.push(...salesMetrics);
+      totalRecords += sales.length;
+      steps.push({
+        key: "fetch_sales",
+        label: "Fetch sales & revenue",
+        status: "success",
+        recordCount: sales.length,
+        durationMs: Date.now() - t0,
+      });
+    } catch (error) {
+      hasAnyError = true;
+      steps.push({
+        key: "fetch_sales",
+        label: "Fetch sales & revenue",
+        status: "error",
+        durationMs: Date.now() - t0,
+        error:
+          error instanceof Error ? error.message : "Failed to fetch sales",
+      });
+    }
+
+    // Step 3: Fetch subscribers (only for membership products, per-product)
     t0 = Date.now();
     try {
       const membershipProducts = products.filter(
         (p) => p.is_tiered_membership && !p.deleted
       );
 
-      const allSubscribers: GumroadSubscriber[] = [];
+      const subscribersByProduct = new Map<
+        string,
+        { subscribers: GumroadSubscriber[]; productName: string }
+      >();
+      let totalSubscriberRecords = 0;
+
       for (const product of membershipProducts) {
         const subs = await fetchSubscribers(accessToken, product.id);
-        allSubscribers.push(...subs);
+        subscribersByProduct.set(product.id, {
+          subscribers: subs,
+          productName: product.name,
+        });
+        totalSubscriberRecords += subs.length;
       }
 
       const subscriberMetrics = computeActiveSubscribers(
-        allSubscribers,
+        subscribersByProduct,
         today
       );
       allMetrics.push(...subscriberMetrics);
-      totalRecords += allSubscribers.length;
+      totalRecords += totalSubscriberRecords;
       steps.push({
         key: "fetch_subscribers",
         label: "Fetch subscribers",
         status: membershipProducts.length === 0 ? "skipped" : "success",
-        recordCount: allSubscribers.length,
+        recordCount: totalSubscriberRecords,
         durationMs: Date.now() - t0,
       });
     } catch (error) {

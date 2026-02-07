@@ -37,24 +37,29 @@ describe("Gumroad Config", () => {
     it("should define all expected metric types", () => {
       const keys = gumroadMetricTypes.map((m) => m.key);
       expect(keys).toContain("revenue");
+      expect(keys).toContain("subscription_revenue");
+      expect(keys).toContain("one_time_revenue");
       expect(keys).toContain("sales_count");
       expect(keys).toContain("products_count");
       expect(keys).toContain("active_subscribers");
     });
 
-    it("should format revenue as currency", () => {
-      const revenue = gumroadMetricTypes.find((m) => m.key === "revenue");
-      expect(revenue?.format).toBe("currency");
+    it("should format revenue metrics as currency", () => {
+      const currencyMetrics = gumroadMetricTypes.filter(
+        (m) => m.format === "currency"
+      );
+      const currencyKeys = currencyMetrics.map((m) => m.key);
+      expect(currencyKeys).toContain("revenue");
+      expect(currencyKeys).toContain("subscription_revenue");
+      expect(currencyKeys).toContain("one_time_revenue");
     });
 
-    it("should format sales_count as number", () => {
+    it("should format count metrics as number", () => {
       const sales = gumroadMetricTypes.find(
         (m) => m.key === "sales_count"
       );
       expect(sales?.format).toBe("number");
-    });
 
-    it("should format active_subscribers as number", () => {
       const subs = gumroadMetricTypes.find(
         (m) => m.key === "active_subscribers"
       );

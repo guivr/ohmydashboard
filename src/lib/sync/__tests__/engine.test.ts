@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { createTestDb } from "../../db";
-import { accounts, metrics, syncLogs } from "../../db/schema";
+import { accounts, metrics, projects, syncLogs } from "../../db/schema";
 import {
   registerIntegration,
   resetRegistry,
@@ -226,6 +226,170 @@ describe("Sync Engine", () => {
 
       const storedMetrics = db.select().from(metrics).all();
       expect(storedMetrics).toHaveLength(2); // Still only 2, not 4
+    });
+
+    it("should store per-project metrics separately from account-level metrics", async () => {
+      registerIntegration(
+        createMockIntegration({
+          syncFn: async () => ({
+            success: true,
+            recordsProcessed: 3,
+            metrics: [
+              // Account-level total
+              {
+                metricType: "revenue",
+                value: 100,
+                currency: "USD",
+                date: "2026-02-01",
+              },
+              // Product A revenue
+              {
+                metricType: "revenue",
+                value: 60,
+                currency: "USD",
+                date: "2026-02-01",
+                projectId: "prod-a",
+                metadata: { product_name: "Product A" },
+              },
+              // Product B revenue
+              {
+                metricType: "revenue",
+                value: 40,
+                currency: "USD",
+                date: "2026-02-01",
+                projectId: "prod-b",
+                metadata: { product_name: "Product B" },
+              },
+            ],
+          }),
+        })
+      );
+
+      const now = new Date().toISOString();
+      db.insert(accounts)
+        .values({
+          id: "acc-1",
+          integrationId: "mock-integration",
+          label: "Test",
+          credentials: JSON.stringify({ api_key: "test" }),
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      await syncAccount("acc-1", db as any);
+
+      // Should have 3 separate metrics (not collapsed into 1)
+      const storedMetrics = db.select().from(metrics).all();
+      expect(storedMetrics).toHaveLength(3);
+
+      const accountLevel = storedMetrics.find((m) => m.projectId === null);
+      expect(accountLevel?.value).toBe(100);
+
+      const prodA = storedMetrics.find((m) => m.projectId === "prod-a");
+      expect(prodA?.value).toBe(60);
+
+      const prodB = storedMetrics.find((m) => m.projectId === "prod-b");
+      expect(prodB?.value).toBe(40);
+    });
+
+    it("should auto-create project rows for new projectIds", async () => {
+      registerIntegration(
+        createMockIntegration({
+          syncFn: async () => ({
+            success: true,
+            recordsProcessed: 1,
+            metrics: [
+              {
+                metricType: "revenue",
+                value: 50,
+                currency: "USD",
+                date: "2026-02-01",
+                projectId: "auto-project",
+                metadata: { product_name: "Auto Created Product" },
+              },
+            ],
+          }),
+        })
+      );
+
+      const now = new Date().toISOString();
+      db.insert(accounts)
+        .values({
+          id: "acc-1",
+          integrationId: "mock-integration",
+          label: "Test",
+          credentials: JSON.stringify({ api_key: "test" }),
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      await syncAccount("acc-1", db as any);
+
+      const storedProjects = db.select().from(projects).all();
+      expect(storedProjects).toHaveLength(1);
+      expect(storedProjects[0].id).toBe("auto-project");
+      expect(storedProjects[0].label).toBe("Auto Created Product");
+      expect(storedProjects[0].accountId).toBe("acc-1");
+    });
+
+    it("should upsert per-project metrics without colliding across projects", async () => {
+      let syncCount = 0;
+      registerIntegration(
+        createMockIntegration({
+          syncFn: async () => {
+            syncCount++;
+            return {
+              success: true,
+              recordsProcessed: 2,
+              metrics: [
+                {
+                  metricType: "revenue",
+                  value: syncCount === 1 ? 60 : 70,
+                  currency: "USD",
+                  date: "2026-02-01",
+                  projectId: "prod-a",
+                  metadata: { product_name: "Product A" },
+                },
+                {
+                  metricType: "revenue",
+                  value: syncCount === 1 ? 40 : 50,
+                  currency: "USD",
+                  date: "2026-02-01",
+                  projectId: "prod-b",
+                  metadata: { product_name: "Product B" },
+                },
+              ],
+            };
+          },
+        })
+      );
+
+      const now = new Date().toISOString();
+      db.insert(accounts)
+        .values({
+          id: "acc-1",
+          integrationId: "mock-integration",
+          label: "Test",
+          credentials: JSON.stringify({ api_key: "test" }),
+          createdAt: now,
+          updatedAt: now,
+        })
+        .run();
+
+      // Sync twice — each project should be upserted independently
+      await syncAccount("acc-1", db as any);
+      await syncAccount("acc-1", db as any);
+
+      const storedMetrics = db.select().from(metrics).all();
+      expect(storedMetrics).toHaveLength(2); // Still 2, not 4
+
+      const prodA = storedMetrics.find((m) => m.projectId === "prod-a");
+      expect(prodA?.value).toBe(70); // Updated to second sync value
+
+      const prodB = storedMetrics.find((m) => m.projectId === "prod-b");
+      expect(prodB?.value).toBe(50); // Updated to second sync value
     });
   });
 

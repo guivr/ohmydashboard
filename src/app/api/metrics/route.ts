@@ -11,6 +11,8 @@ import { eq, and, gte, lte, sql, desc, inArray } from "drizzle-orm";
  * - accountId: Filter by single account (legacy)
  * - accountIds: Comma-separated list of account IDs to include
  * - metricType: Filter by metric type (e.g. "revenue", "mrr")
+ * - projectId: Filter by project/product ID
+ * - withProject: "true" to only return per-project metrics, "false" for account-level only
  * - from: Start date (YYYY-MM-DD)
  * - to: End date (YYYY-MM-DD)
  * - aggregation: "daily" (default) | "total"
@@ -20,6 +22,8 @@ export async function GET(request: Request) {
   const accountId = searchParams.get("accountId");
   const accountIds = searchParams.get("accountIds");
   const metricType = searchParams.get("metricType");
+  const projectId = searchParams.get("projectId");
+  const withProject = searchParams.get("withProject");
   const from = searchParams.get("from");
   const to = searchParams.get("to");
   const aggregation = searchParams.get("aggregation") || "daily";
@@ -39,6 +43,14 @@ export async function GET(request: Request) {
     conditions.push(eq(metrics.accountId, accountId));
   }
   if (metricType) conditions.push(eq(metrics.metricType, metricType));
+  if (projectId) conditions.push(eq(metrics.projectId, projectId));
+  if (withProject === "true") {
+    // Only return metrics that have a projectId (per-product)
+    conditions.push(sql`${metrics.projectId} IS NOT NULL`);
+  } else if (withProject === "false") {
+    // Only return account-level metrics (no projectId)
+    conditions.push(sql`${metrics.projectId} IS NULL`);
+  }
   if (from) conditions.push(gte(metrics.date, from));
   if (to) conditions.push(lte(metrics.date, to));
 
@@ -64,6 +76,7 @@ export async function GET(request: Request) {
     .select({
       id: metrics.id,
       accountId: metrics.accountId,
+      projectId: metrics.projectId,
       metricType: metrics.metricType,
       value: metrics.value,
       currency: metrics.currency,

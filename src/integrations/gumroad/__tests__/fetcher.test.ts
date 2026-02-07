@@ -4,38 +4,72 @@ import { gumroadFetcher } from "../fetcher";
 
 // ─── Mock data ───────────────────────────────────────────────────────────────
 
-const mockSales = [
-  createMockSale({ price: 2999, created_at: "2026-02-01T10:00:00Z" }),
-  createMockSale({ price: 4999, created_at: "2026-02-01T14:00:00Z" }),
-  createMockSale({ price: 1999, created_at: "2026-02-02T09:00:00Z" }),
-  createMockSale({
-    price: 999,
-    created_at: "2026-02-03T12:00:00Z",
-    refunded: true,
-  }),
-  createMockSale({
-    price: 500,
-    created_at: "2026-02-03T15:00:00Z",
-    chargedback: true,
-  }),
-];
-
 const mockProducts = [
   createMockProduct({
-    id: "prod_1",
+    id: "prod_sub",
+    name: "Premium Membership",
     published: true,
     is_tiered_membership: true,
   }),
   createMockProduct({
-    id: "prod_2",
+    id: "prod_ebook",
+    name: "UI Design eBook",
     published: true,
     is_tiered_membership: false,
   }),
   createMockProduct({
-    id: "prod_3",
+    id: "prod_deleted",
+    name: "Deleted Thing",
     published: false,
     deleted: true,
     is_tiered_membership: false,
+  }),
+];
+
+const mockSales = [
+  // Subscription product sales
+  createMockSale({
+    price: 2999,
+    created_at: "2026-02-01T10:00:00Z",
+    product_id: "prod_sub",
+    product_name: "Premium Membership",
+    subscription_duration: "monthly",
+  }),
+  createMockSale({
+    price: 2999,
+    created_at: "2026-02-02T11:00:00Z",
+    product_id: "prod_sub",
+    product_name: "Premium Membership",
+    subscription_duration: "monthly",
+  }),
+  // One-time product sales
+  createMockSale({
+    price: 4999,
+    created_at: "2026-02-01T14:00:00Z",
+    product_id: "prod_ebook",
+    product_name: "UI Design eBook",
+  }),
+  createMockSale({
+    price: 4999,
+    created_at: "2026-02-02T09:00:00Z",
+    product_id: "prod_ebook",
+    product_name: "UI Design eBook",
+  }),
+  // Refunded sale — should be excluded
+  createMockSale({
+    price: 999,
+    created_at: "2026-02-03T12:00:00Z",
+    product_id: "prod_ebook",
+    product_name: "UI Design eBook",
+    refunded: true,
+  }),
+  // Chargedback sale — should be excluded
+  createMockSale({
+    price: 500,
+    created_at: "2026-02-03T15:00:00Z",
+    product_id: "prod_sub",
+    product_name: "Premium Membership",
+    chargedback: true,
   }),
 ];
 
@@ -93,34 +127,38 @@ function createFetchMock() {
 function createMockSale(overrides: {
   price: number;
   created_at: string;
+  product_id: string;
+  product_name: string;
   refunded?: boolean;
   chargedback?: boolean;
+  subscription_duration?: string;
 }) {
   return {
     id: `sale_${Math.random().toString(36).slice(2)}`,
     created_at: overrides.created_at,
-    product_name: "Test Product",
-    product_id: "prod_1",
+    product_name: overrides.product_name,
+    product_id: overrides.product_id,
     price: overrides.price,
     gumroad_fee: Math.round(overrides.price * 0.1),
     refunded: overrides.refunded ?? false,
     partially_refunded: false,
     chargedback: overrides.chargedback ?? false,
     currency_symbol: "$",
-    subscription_duration: null,
+    subscription_duration: overrides.subscription_duration ?? null,
     quantity: 1,
   };
 }
 
 function createMockProduct(overrides: {
   id: string;
+  name: string;
   published: boolean;
   is_tiered_membership: boolean;
   deleted?: boolean;
 }) {
   return {
     id: overrides.id,
-    name: `Product ${overrides.id}`,
+    name: overrides.name,
     published: overrides.published,
     deleted: overrides.deleted ?? false,
     price: 999,
@@ -135,7 +173,7 @@ function createMockProduct(overrides: {
 function createMockSubscriber(overrides: { status: string }) {
   return {
     id: `sub_${Math.random().toString(36).slice(2)}`,
-    product_id: "prod_1",
+    product_id: "prod_sub",
     status: overrides.status,
     created_at: "2026-01-15T10:00:00Z",
   };
@@ -170,48 +208,126 @@ describe("Gumroad Fetcher", () => {
       expect(result.error).toBeUndefined();
     });
 
-    it("should compute daily revenue from sales, excluding refunded and chargedback", async () => {
+    // ── Per-product metrics ──────────────────────────────────────────────
+
+    it("should produce per-product revenue metrics with projectId", async () => {
       const result = await gumroadFetcher.sync(
         mockAccount,
         new Date("2026-01-01")
       );
 
-      const revenueMetrics = result.metrics.filter(
-        (m) => m.metricType === "revenue"
+      const perProductRevenue = result.metrics.filter(
+        (m) => m.metricType === "revenue" && m.projectId
+      );
+
+      // prod_sub: Feb 1 ($29.99), Feb 2 ($29.99)
+      // prod_ebook: Feb 1 ($49.99), Feb 2 ($49.99)
+      // Feb 3 excluded (refunded + chargedback)
+      expect(perProductRevenue).toHaveLength(4);
+
+      const subFeb1 = perProductRevenue.find(
+        (m) => m.projectId === "prod_sub" && m.date === "2026-02-01"
+      );
+      expect(subFeb1?.value).toBeCloseTo(29.99);
+      expect(subFeb1?.metadata?.product_name).toBe("Premium Membership");
+      expect(subFeb1?.metadata?.product_type).toBe("subscription");
+
+      const ebookFeb1 = perProductRevenue.find(
+        (m) => m.projectId === "prod_ebook" && m.date === "2026-02-01"
+      );
+      expect(ebookFeb1?.value).toBeCloseTo(49.99);
+      expect(ebookFeb1?.metadata?.product_name).toBe("UI Design eBook");
+      expect(ebookFeb1?.metadata?.product_type).toBe("one_time");
+    });
+
+    it("should produce per-product sales_count with projectId", async () => {
+      const result = await gumroadFetcher.sync(
+        mockAccount,
+        new Date("2026-01-01")
+      );
+
+      const perProductSales = result.metrics.filter(
+        (m) => m.metricType === "sales_count" && m.projectId
+      );
+
+      // 4 entries: 2 products x 2 days
+      expect(perProductSales).toHaveLength(4);
+
+      const subFeb1 = perProductSales.find(
+        (m) => m.projectId === "prod_sub" && m.date === "2026-02-01"
+      );
+      expect(subFeb1?.value).toBe(1);
+    });
+
+    // ── Account-level totals ─────────────────────────────────────────────
+
+    it("should produce account-level total revenue (no projectId)", async () => {
+      const result = await gumroadFetcher.sync(
+        mockAccount,
+        new Date("2026-01-01")
+      );
+
+      const totalRevenue = result.metrics.filter(
+        (m) => m.metricType === "revenue" && !m.projectId
       );
 
       // Feb 1: $29.99 + $49.99 = $79.98
-      // Feb 2: $19.99
-      // Feb 3: both sales are refunded/chargedback — excluded
-      expect(revenueMetrics).toHaveLength(2);
+      // Feb 2: $29.99 + $49.99 = $79.98
+      expect(totalRevenue).toHaveLength(2);
 
-      const feb1 = revenueMetrics.find((m) => m.date === "2026-02-01");
+      const feb1 = totalRevenue.find((m) => m.date === "2026-02-01");
       expect(feb1?.value).toBeCloseTo(79.98);
-      expect(feb1?.currency).toBe("USD");
-
-      const feb2 = revenueMetrics.find((m) => m.date === "2026-02-02");
-      expect(feb2?.value).toBeCloseTo(19.99);
     });
 
-    it("should compute daily sale counts, excluding refunded and chargedback", async () => {
+    // ── Subscription vs one-time split ───────────────────────────────────
+
+    it("should produce subscription_revenue metric", async () => {
       const result = await gumroadFetcher.sync(
         mockAccount,
         new Date("2026-01-01")
       );
 
-      const countMetrics = result.metrics.filter(
-        (m) => m.metricType === "sales_count"
+      const subRevenue = result.metrics.filter(
+        (m) => m.metricType === "subscription_revenue"
       );
 
-      // Feb 1: 2 sales, Feb 2: 1 sale, Feb 3: 0 (both excluded)
-      expect(countMetrics).toHaveLength(2);
-
-      const feb1 = countMetrics.find((m) => m.date === "2026-02-01");
-      expect(feb1?.value).toBe(2);
-
-      const feb2 = countMetrics.find((m) => m.date === "2026-02-02");
-      expect(feb2?.value).toBe(1);
+      // Feb 1: $29.99, Feb 2: $29.99
+      expect(subRevenue).toHaveLength(2);
+      expect(subRevenue[0].value).toBeCloseTo(29.99);
+      expect(subRevenue[0].currency).toBe("USD");
     });
+
+    it("should produce one_time_revenue metric", async () => {
+      const result = await gumroadFetcher.sync(
+        mockAccount,
+        new Date("2026-01-01")
+      );
+
+      const otRevenue = result.metrics.filter(
+        (m) => m.metricType === "one_time_revenue"
+      );
+
+      // Feb 1: $49.99, Feb 2: $49.99
+      expect(otRevenue).toHaveLength(2);
+      expect(otRevenue[0].value).toBeCloseTo(49.99);
+    });
+
+    // ── Exclusions ───────────────────────────────────────────────────────
+
+    it("should exclude refunded and chargedback sales from all metrics", async () => {
+      const result = await gumroadFetcher.sync(
+        mockAccount,
+        new Date("2026-01-01")
+      );
+
+      // No Feb 3 revenue in any metric (both sales on that day are excluded)
+      const feb3Metrics = result.metrics.filter(
+        (m) => m.date === "2026-02-03"
+      );
+      expect(feb3Metrics).toHaveLength(0);
+    });
+
+    // ── Products ─────────────────────────────────────────────────────────
 
     it("should count published products", async () => {
       const result = await gumroadFetcher.sync(
@@ -224,48 +340,46 @@ describe("Gumroad Fetcher", () => {
       );
 
       expect(productMetrics).toHaveLength(1);
-      // 2 published, 1 deleted
-      expect(productMetrics[0].value).toBe(2);
+      expect(productMetrics[0].value).toBe(2); // deleted one excluded
     });
 
-    it("should count active subscribers (alive + pending_cancellation)", async () => {
+    // ── Subscribers ──────────────────────────────────────────────────────
+
+    it("should produce per-product active_subscribers with projectId", async () => {
       const result = await gumroadFetcher.sync(
         mockAccount,
         new Date("2026-01-01")
       );
 
-      const subMetrics = result.metrics.filter(
-        (m) => m.metricType === "active_subscribers"
+      const perProductSubs = result.metrics.filter(
+        (m) => m.metricType === "active_subscribers" && m.projectId
       );
 
-      expect(subMetrics).toHaveLength(1);
-      // 2 alive + 1 pending_cancellation = 3 (cancelled and failed_payment excluded)
-      expect(subMetrics[0].value).toBe(3);
+      // Only prod_sub is a membership product
+      expect(perProductSubs).toHaveLength(1);
+      expect(perProductSubs[0].projectId).toBe("prod_sub");
+      // 2 alive + 1 pending_cancellation = 3
+      expect(perProductSubs[0].value).toBe(3);
+      expect(perProductSubs[0].metadata?.product_name).toBe(
+        "Premium Membership"
+      );
     });
 
-    it("should count total records processed", async () => {
+    it("should produce account-level total active_subscribers", async () => {
       const result = await gumroadFetcher.sync(
         mockAccount,
         new Date("2026-01-01")
       );
 
-      // 5 sales + 3 products + 5 subscribers = 13
-      expect(result.recordsProcessed).toBe(13);
-    });
-
-    it("should have no revenue metric for days with only refunded/chargedback sales", async () => {
-      const result = await gumroadFetcher.sync(
-        mockAccount,
-        new Date("2026-01-01")
+      const totalSubs = result.metrics.filter(
+        (m) => m.metricType === "active_subscribers" && !m.projectId
       );
 
-      const revenueMetrics = result.metrics.filter(
-        (m) => m.metricType === "revenue"
-      );
-
-      const feb3 = revenueMetrics.find((m) => m.date === "2026-02-03");
-      expect(feb3).toBeUndefined();
+      expect(totalSubs).toHaveLength(1);
+      expect(totalSubs[0].value).toBe(3);
     });
+
+    // ── Sync steps ───────────────────────────────────────────────────────
 
     it("should report sync steps with durations", async () => {
       const result = await gumroadFetcher.sync(
@@ -277,11 +391,10 @@ describe("Gumroad Fetcher", () => {
       expect(result.steps!.length).toBe(3);
 
       const stepKeys = result.steps!.map((s) => s.key);
-      expect(stepKeys).toContain("fetch_sales");
       expect(stepKeys).toContain("fetch_products");
+      expect(stepKeys).toContain("fetch_sales");
       expect(stepKeys).toContain("fetch_subscribers");
 
-      // All steps should have a durationMs
       for (const step of result.steps!) {
         expect(step.durationMs).toBeDefined();
         expect(step.durationMs).toBeGreaterThanOrEqual(0);
@@ -289,24 +402,21 @@ describe("Gumroad Fetcher", () => {
     });
 
     it("should only fetch subscribers for membership products", async () => {
-      const result = await gumroadFetcher.sync(
-        mockAccount,
-        new Date("2026-01-01")
-      );
+      await gumroadFetcher.sync(mockAccount, new Date("2026-01-01"));
 
-      // The fetch mock is called once for subscribers (only prod_1 is a membership)
       const fetchCalls = vi.mocked(fetch).mock.calls;
       const subscriberCalls = fetchCalls.filter((call) =>
         call[0].toString().includes("/subscribers")
       );
 
-      // Only prod_1 is_tiered_membership=true and not deleted
+      // Only prod_sub is a membership product
       expect(subscriberCalls).toHaveLength(1);
-      expect(subscriberCalls[0][0].toString()).toContain("prod_1");
+      expect(subscriberCalls[0][0].toString()).toContain("prod_sub");
     });
 
+    // ── Partial failures ─────────────────────────────────────────────────
+
     it("should handle partial failures gracefully", async () => {
-      // Override fetch to fail on sales but succeed on products/subscribers
       vi.stubGlobal(
         "fetch",
         vi.fn(async (url: string | URL | Request) => {
@@ -348,19 +458,28 @@ describe("Gumroad Fetcher", () => {
         new Date("2026-01-01")
       );
 
-      // Should succeed overall (partial success)
       expect(result.success).toBe(true);
       expect(result.error).toBe("Some sync steps failed");
 
-      // Sales step should be an error
       const salesStep = result.steps!.find((s) => s.key === "fetch_sales");
       expect(salesStep?.status).toBe("error");
 
-      // Products and subscribers steps should succeed
       const productsStep = result.steps!.find(
         (s) => s.key === "fetch_products"
       );
       expect(productsStep?.status).toBe("success");
+    });
+
+    // ── Record counts ────────────────────────────────────────────────────
+
+    it("should count total records processed", async () => {
+      const result = await gumroadFetcher.sync(
+        mockAccount,
+        new Date("2026-01-01")
+      );
+
+      // 6 sales + 3 products + 5 subscribers = 14
+      expect(result.recordsProcessed).toBe(14);
     });
   });
 
