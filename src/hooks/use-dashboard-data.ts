@@ -48,7 +48,8 @@ export type DateRangePreset =
   | "month_to_date"
   | "quarter_to_date"
   | "year_to_date"
-  | "all_time";
+  | "all_time"
+  | "custom";
 
 function resolveDateRange(preset: DateRangePreset) {
   const now = new Date();
@@ -150,6 +151,7 @@ export interface DashboardData {
   prevRangeFrom?: string;
   prevRangeTo?: string;
   handleDateRangeChange: (preset: DateRangePreset) => void;
+  handleCustomRangeChange: (range: { from: Date; to: Date }) => void;
   handleCompareToggle: (enabled: boolean) => void;
 
   // Metrics
@@ -737,6 +739,7 @@ export function useDashboardData(): DashboardData {
   const [enabledAccountIds, setEnabledAccountIds] = useState<Set<string>>(new Set());
   const [enabledProjectIds, setEnabledProjectIds] = useState<Set<string>>(new Set());
   const [dateRangePreset, setDateRangePreset] = useState<DateRangePreset>("last_30_days");
+  const [customRange, setCustomRange] = useState<{ from?: Date; to?: Date }>({});
   const [compareEnabled, setCompareEnabled] = useState(true);
   const initialized = useRef(false);
   const backfillKeyRef = useRef<string | null>(null);
@@ -786,10 +789,17 @@ export function useDashboardData(): DashboardData {
       ? accountIdsArray
       : ["__none__"];
 
-  const { from, to } = useMemo(
-    () => resolveDateRange(dateRangePreset),
-    [dateRangePreset]
-  );
+  const { from, to } = useMemo(() => {
+    if (dateRangePreset === "custom") {
+      const fromDate = customRange.from ? startOfDay(customRange.from) : undefined;
+      const toDate = customRange.to ? endOfDay(customRange.to) : undefined;
+      return {
+        from: fromDate ? format(fromDate, "yyyy-MM-dd") : undefined,
+        to: toDate ? format(toDate, "yyyy-MM-dd") : undefined,
+      };
+    }
+    return resolveDateRange(dateRangePreset);
+  }, [dateRangePreset, customRange]);
 
   const { prevFrom, prevTo } = useMemo(() => {
     if (!from || !to || !compareEnabled) return { prevFrom: undefined, prevTo: undefined };
@@ -1548,6 +1558,11 @@ export function useDashboardData(): DashboardData {
     }
   }, []);
 
+  const handleCustomRangeChange = useCallback((range: { from: Date; to: Date }) => {
+    setCustomRange(range);
+    setDateRangePreset("custom");
+  }, []);
+
   const handleCompareToggle = useCallback((enabled: boolean) => {
     setCompareEnabled(enabled);
   }, []);
@@ -1584,6 +1599,7 @@ export function useDashboardData(): DashboardData {
     prevRangeFrom: prevFrom,
     prevRangeTo: prevTo,
     handleDateRangeChange,
+    handleCustomRangeChange,
     handleCompareToggle,
 
     currentTotals,

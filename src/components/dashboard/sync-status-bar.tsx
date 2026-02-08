@@ -126,6 +126,7 @@ export function SyncStatusBar({
   const elapsedTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const autoSyncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const hasAccounts = accounts.length > 0;
 
@@ -308,6 +309,29 @@ export function SyncStatusBar({
       hasSynced.current = true;
       runSync();
     }
+  }, [autoSync, hasAccounts, runSync]);
+
+  // Auto-sync every 30 minutes while the page is open/visible
+  useEffect(() => {
+    if (!autoSync || !hasAccounts) return;
+
+    if (autoSyncIntervalRef.current) {
+      clearInterval(autoSyncIntervalRef.current);
+      autoSyncIntervalRef.current = null;
+    }
+
+    autoSyncIntervalRef.current = setInterval(() => {
+      if (document.visibilityState === "visible") {
+        runSync();
+      }
+    }, 30 * 60 * 1000);
+
+    return () => {
+      if (autoSyncIntervalRef.current) {
+        clearInterval(autoSyncIntervalRef.current);
+        autoSyncIntervalRef.current = null;
+      }
+    };
   }, [autoSync, hasAccounts, runSync]);
 
   // Cleanup timers on unmount

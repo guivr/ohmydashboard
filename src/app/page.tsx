@@ -43,6 +43,7 @@ export default function Dashboard() {
     prevRangeFrom,
     prevRangeTo,
     handleDateRangeChange,
+    handleCustomRangeChange,
     handleCompareToggle,
     currentTotals,
     previousTotals,
@@ -75,6 +76,8 @@ export default function Dashboard() {
         return "vs previous quarter-to-date";
       case "year_to_date":
         return "vs previous year-to-date";
+      case "custom":
+        return "vs previous period";
       case "all_time":
       default:
         return undefined;
@@ -97,6 +100,8 @@ export default function Dashboard() {
         return "QTD";
       case "year_to_date":
         return "YTD";
+      case "custom":
+        return "Custom";
       case "all_time":
       default:
         return "All time";
@@ -257,8 +262,11 @@ export default function Dashboard() {
             />
             <DateRangeFilter
               value={dateRangePreset}
+              rangeFrom={rangeFrom}
+              rangeTo={rangeTo}
               compareEnabled={compareEnabled}
               onChange={handleDateRangeChange}
+              onCustomRangeChange={handleCustomRangeChange}
               onCompareToggle={handleCompareToggle}
             />
             {compareBackfillStatus === "running" && (
