@@ -198,8 +198,13 @@ export async function runCli(args: string[], deps: CliDeps) {
   await exec("pnpm", ["install"], { cwd: targetPath });
 
   log("");
-  log("Setup complete!");
-  log(`cd ${targetDir}`);
-  log("pnpm dev");
-  log("Open http://localhost:3000 and connect integrations at /settings");
+  log("┌──────────────────────────────────────────────┐");
+  log("│  ✅ OhMyDashboard is ready                   │");
+  log("└──────────────────────────────────────────────┘");
+  log("");
+  log("Next steps:");
+  log(`  1) cd ${targetDir}`);
+  log("  2) pnpm dev");
+  log("");
+  log("Then open http://localhost:3000 and connect integrations at /settings");
 }

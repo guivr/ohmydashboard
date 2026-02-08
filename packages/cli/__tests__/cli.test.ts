@@ -40,7 +40,10 @@ describe("ohmydashboard CLI", () => {
       ["install"],
       { cwd: path.join(cwd, "ohmydashboard") }
     );
-    expect(logs.join("\n")).toContain("pnpm dev");
+    const output = logs.join("\n");
+    expect(output).toContain("Next steps");
+    expect(output).toContain("cd ohmydashboard");
+    expect(output).toContain("pnpm dev");
   });
 
   it("accepts a custom target directory", async () => {
