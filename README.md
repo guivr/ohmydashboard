@@ -9,6 +9,7 @@ performance across all your businesses.
 OhMyDashboard is open source and runs locally. Your data stays on your machine.
 
 ![OhMyDashboard preview](docs/screenshots/dashboard.jpg)
+![Sync log preview](docs/screenshots/sync.jpg)
 
 ## Why this exists
 
