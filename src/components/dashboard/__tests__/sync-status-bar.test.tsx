@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { SyncStatusBar } from "../sync-status-bar";
 import * as apiClient from "@/lib/api-client";
@@ -8,6 +8,10 @@ vi.mock("@/lib/api-client", () => ({
 }));
 
 describe("SyncStatusBar", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("should show syncing state with account name when syncing", async () => {
     // Create a delayed promise so we can see the syncing state
     vi.mocked(apiClient.apiPost).mockImplementation(
@@ -347,5 +351,48 @@ describe("SyncStatusBar", () => {
       },
       { timeout: 3000 }
     );
+  });
+
+  it("should refresh a specific account from the sync log", async () => {
+    vi.mocked(apiClient.apiPost).mockResolvedValue({
+      success: true,
+      recordsProcessed: 0,
+    });
+
+    render(
+      <SyncStatusBar
+        accounts={[
+          { id: "acc1", label: "My SaaS", integrationName: "RevenueCat" },
+        ]}
+        onSyncComplete={vi.fn()}
+        autoSync={true}
+      />
+    );
+
+    await waitFor(
+      () => {
+        expect(
+          screen.getByText(/Synced|Already up to date/)
+        ).toBeInTheDocument();
+      },
+      { timeout: 3000 }
+    );
+
+    const summaryButton = screen
+      .getByText(/Synced|Already up to date/)
+      .closest("button")!;
+    fireEvent.click(summaryButton);
+
+    const refreshButton = screen.getByRole("button", {
+      name: "Refresh My SaaS",
+    });
+    fireEvent.click(refreshButton);
+
+    await waitFor(() => {
+      expect(apiClient.apiPost).toHaveBeenCalledTimes(2);
+      expect(apiClient.apiPost).toHaveBeenLastCalledWith("/api/sync", {
+        accountId: "acc1",
+      });
+    });
   });
 });

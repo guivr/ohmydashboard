@@ -154,6 +154,89 @@ export function SyncStatusBar({
     }
   }, []);
 
+  const refreshAccount = useCallback(
+    async (accountId: string) => {
+      if (syncingRef.current) return;
+      const account = accounts.find((a) => a.id === accountId);
+      if (!account) return;
+
+      setAccountStates((prev) => {
+        if (prev.length === 0) {
+          return accounts.map((a) => ({
+            accountId: a.id,
+            label: a.label,
+            integrationName: a.integrationName,
+            status: a.id === accountId ? "syncing" : "pending",
+            recordsProcessed: 0,
+          }));
+        }
+        return prev.map((s) =>
+          s.accountId === accountId
+            ? { ...s, status: "syncing", error: undefined }
+            : s
+        );
+      });
+
+      try {
+        const result = await apiPost<{
+          success: boolean;
+          recordsProcessed: number;
+          error?: string;
+          steps?: SyncStepResult[];
+          startedAt?: string;
+          completedAt?: string;
+        }>("/api/sync", { accountId });
+
+        setAccountStates((prev) =>
+          prev.map((s) =>
+            s.accountId === accountId
+              ? {
+                  ...s,
+                  status: result.success ? "done" : "error",
+                  steps: result.steps,
+                  recordsProcessed: result.recordsProcessed,
+                  error: result.error,
+                  lastSyncAt: result.completedAt ?? result.startedAt,
+                }
+              : s
+          )
+        );
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Sync failed";
+        const isCooldown = msg.includes("cooldown");
+        let lastSyncAt: string | undefined;
+
+        if (isCooldown) {
+          try {
+            const data = await apiGet<{
+              status: { completedAt?: string; startedAt?: string } | null;
+            }>(`/api/sync?accountId=${accountId}`);
+            lastSyncAt = data.status?.completedAt ?? data.status?.startedAt;
+          } catch {
+            lastSyncAt = undefined;
+          }
+        }
+
+        setAccountStates((prev) =>
+          prev.map((s) =>
+            s.accountId === accountId
+              ? {
+                  ...s,
+                  status: isCooldown ? "cooldown" : "error",
+                  recordsProcessed: 0,
+                  error: isCooldown ? undefined : msg,
+                  lastSyncAt,
+                }
+              : s
+          )
+        );
+      } finally {
+        onSyncComplete();
+      }
+    },
+    [accounts, onSyncComplete]
+  );
+
   const runSync = useCallback(async (fullSync = false) => {
     if (syncingRef.current || accounts.length === 0) return;
     syncingRef.current = true;
@@ -488,7 +571,12 @@ export function SyncStatusBar({
           </div>
           <div className="max-h-72 overflow-y-auto">
             {accountStates.map((account) => (
-              <AccountSyncEntry key={account.accountId} account={account} />
+              <AccountSyncEntry
+                key={account.accountId}
+                account={account}
+                onRefresh={() => refreshAccount(account.accountId)}
+                refreshDisabled={isSyncing}
+              />
             ))}
           </div>
           {/* Full re-sync option */}
@@ -518,7 +606,15 @@ export function SyncStatusBar({
 
 // --- Account entry in the dropdown ---
 
-function AccountSyncEntry({ account }: { account: AccountSyncState }) {
+function AccountSyncEntry({
+  account,
+  onRefresh,
+  refreshDisabled,
+}: {
+  account: AccountSyncState;
+  onRefresh?: () => void;
+  refreshDisabled?: boolean;
+}) {
   const {
     label,
     integrationName,
@@ -537,6 +633,22 @@ function AccountSyncEntry({ account }: { account: AccountSyncState }) {
         <span className="flex-1 truncate text-xs font-medium text-foreground">
           {label}
         </span>
+        {onRefresh && (
+          <button
+            type="button"
+            aria-label={`Refresh ${label}`}
+            className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-50"
+            disabled={refreshDisabled || status === "syncing"}
+            onClick={onRefresh}
+          >
+            <RefreshCw
+              className={`h-3 w-3 ${
+                status === "syncing" ? "animate-spin" : ""
+              }`}
+            />
+            {status === "syncing" ? "Refreshing" : "Refresh"}
+          </button>
+        )}
         <AccountStatusIcon status={status} />
       </div>
 
