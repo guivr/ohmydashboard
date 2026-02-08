@@ -16,10 +16,12 @@ import {
   useProductMetrics,
   useIntegrations,
   useProjectGroups,
+  useCustomersByCountry,
   type MetricsResponse,
   type AggregatedMetric,
   type ProductMetricsResponse,
   type ProjectGroupResponse,
+  type CustomersByCountryResponse,
 } from "./use-metrics";
 import type { RankingEntry } from "@/components/dashboard/metric-card";
 import { apiPost } from "@/lib/api-client";
@@ -177,6 +179,10 @@ export interface DashboardData {
   // Rankings
   accountRankings: Record<string, RankingEntry[]>;
   blendedRankings: Record<string, RankingEntry[]>;
+
+  // Customers by country
+  customersByCountry: CustomersByCountryResponse;
+  customersByCountryLoading: boolean;
 
   // Callbacks
   handleSyncComplete: () => void;
@@ -836,6 +842,13 @@ export function useDashboardData(): DashboardData {
       accountIds: effectiveAccountIds,
     });
 
+  const { data: customersByCountryData, loading: customersByCountryLoading, refetch: refetchCustomersByCountry } =
+    useCustomersByCountry({
+      from,
+      to,
+      accountIds: effectiveAccountIds,
+    });
+
   // ─── Derived data ────────────────────────────────────────────────────────
 
   const hasAccounts = useMemo(
@@ -983,6 +996,7 @@ export function useDashboardData(): DashboardData {
           refetchTotals();
           refetchPrevTotals();
           refetchProductMetrics();
+          refetchCustomersByCountry();
         })
         .catch((err) => {
           const message = err instanceof Error ? err.message : "Backfill failed";
@@ -1004,6 +1018,7 @@ export function useDashboardData(): DashboardData {
       refetchTotals,
       refetchPrevTotals,
       refetchProductMetrics,
+      refetchCustomersByCountry,
     ]
   );
 
@@ -1541,7 +1556,8 @@ export function useDashboardData(): DashboardData {
     refetchPrevTotals();
     refetchProductMetrics();
     refetchProjectGroups();
-  }, [refetchIntegrations, refetchMetrics, refetchTotals, refetchPrevTotals, refetchProductMetrics, refetchProjectGroups]);
+    refetchCustomersByCountry();
+  }, [refetchIntegrations, refetchMetrics, refetchTotals, refetchPrevTotals, refetchProductMetrics, refetchProjectGroups, refetchCustomersByCountry]);
 
   const handleFilterChange = useCallback(
     (nextAccountIds: Set<string>, nextProjectIds: Set<string>) => {
@@ -1574,7 +1590,8 @@ export function useDashboardData(): DashboardData {
     refetchPrevTotals();
     refetchProductMetrics();
     refetchProjectGroups();
-  }, [refetchIntegrations, refetchMetrics, refetchTotals, refetchPrevTotals, refetchProductMetrics, refetchProjectGroups]);
+    refetchCustomersByCountry();
+  }, [refetchIntegrations, refetchMetrics, refetchTotals, refetchPrevTotals, refetchProductMetrics, refetchProjectGroups, refetchCustomersByCountry]);
 
   return {
     loading: integrationsLoading || metricsLoading || totalsLoading,
@@ -1612,6 +1629,9 @@ export function useDashboardData(): DashboardData {
 
     accountRankings,
     blendedRankings,
+
+    customersByCountry: customersByCountryData,
+    customersByCountryLoading,
 
     handleSyncComplete,
     refetchAll,

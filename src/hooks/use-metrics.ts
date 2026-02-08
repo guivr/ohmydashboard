@@ -212,6 +212,81 @@ export function useProjectGroups() {
   return { data, loading, error, refetch: fetchGroups };
 }
 
+// ─── useCustomersByCountry ──────────────────────────────────────────────────
+
+export interface CountryCustomers {
+  country: string;
+  count: number;
+}
+
+export interface CountrySourceBreakdown {
+  country: string;
+  count: number;
+  accountId: string;
+  projectId: string | null;
+}
+
+export interface CustomersByCountryResponse {
+  totals: CountryCustomers[];
+  bySource: CountrySourceBreakdown[];
+  accounts: Record<string, string>;
+  projects: Record<string, { label: string; accountId: string }>;
+}
+
+export type CustomerCountryType = "paying" | "all";
+
+interface UseCustomersByCountryOptions {
+  accountIds?: string[];
+  from?: string;
+  to?: string;
+  /** "paying" (default) shows only paying customers; "all" includes free users */
+  type?: CustomerCountryType;
+}
+
+export function useCustomersByCountry(options: UseCustomersByCountryOptions = {}) {
+  const [data, setData] = useState<CustomersByCountryResponse>({
+    totals: [],
+    bySource: [],
+    accounts: {},
+    projects: {},
+  });
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const isInitialLoad = useRef(true);
+
+  const accountIdsKey = options.accountIds?.join(",") ?? "";
+  const type = options.type ?? "paying";
+
+  const fetchData = useCallback(async () => {
+    if (isInitialLoad.current) setLoading(true);
+    setError(null);
+
+    try {
+      const params = new URLSearchParams();
+      if (accountIdsKey) params.set("accountIds", accountIdsKey);
+      if (options.from) params.set("from", options.from);
+      if (options.to) params.set("to", options.to);
+      params.set("type", type);
+
+      const result = await apiGet<CustomersByCountryResponse>(
+        `/api/metrics/customers-by-country?${params.toString()}`
+      );
+      setData(result);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      if (isInitialLoad.current) setLoading(false);
+      isInitialLoad.current = false;
+    }
+  }, [accountIdsKey, options.from, options.to, type]);
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  return { data, loading, error, refetch: fetchData };
+}
+
 // ─── useIntegrations ──────────────────────────────────────────────────────────
 
 export function useIntegrations() {
