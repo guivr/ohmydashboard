@@ -17,7 +17,7 @@ If you are an indie builder, you are constantly switching tabs:
 - Stripe for subscriptions (and multiple accounts)
 - Gumroad for legacy products
 - RevenueCat for mobile apps
-- App Store Connect, Mixpanel, X, Facebook Ads (soon)
+- App Store Connect, Mixpanel, Facebook Ads (soon)
 
 OhMyDashboard gives you one place to check every day, with filters for accounts,
 projects, and time ranges. It is built to be flexible without feeling complex.
@@ -58,11 +58,6 @@ Open [http://localhost:3000](http://localhost:3000).
 Go to [http://localhost:3000/settings](http://localhost:3000/settings) and
 add your integrations (Stripe, Gumroad, RevenueCat). Credentials are stored
 locally, never sent to any external server.
-
-### 4) Sync data
-
-From the Settings page, click **Sync** on each connected account. You'll see
-metrics populate the dashboard immediately.
 
 ## What you get
 
