@@ -15,6 +15,12 @@ npm login
 From the repo root:
 
 ```bash
+# Bump version first (required for npm to publish)
+cd packages/cli
+pnpm version patch
+```
+
+```bash
 pnpm cli:build
 pnpm cli:publish
 ```
