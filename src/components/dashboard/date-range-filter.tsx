@@ -212,7 +212,13 @@ export function DateRangeFilter({
               numberOfMonths={2}
               defaultMonth={draftRange?.from}
               selected={draftRange}
-              onSelect={(range) => {
+              onSelect={(range, selectedDay) => {
+                if (draftRange?.from && draftRange?.to) {
+                  setDraftRange(selectedDay ? { from: selectedDay, to: undefined } : undefined);
+                  setDraftPreset("custom");
+                  return;
+                }
+
                 setDraftRange(range);
                 setDraftPreset("custom");
               }}
