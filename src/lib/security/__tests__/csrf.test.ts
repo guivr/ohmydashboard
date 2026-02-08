@@ -123,13 +123,29 @@ describe("CSRF Protection", () => {
   });
 
   describe("no origin or referer", () => {
-    it("should allow POST with no origin or referer (e.g. curl)", () => {
+    it("should reject POST with no origin, referer, or custom header", () => {
       const result = validateCsrf(makeRequest("POST"));
+      expect(result).not.toBeNull();
+      expect(result!.status).toBe(403);
+    });
+
+    it("should reject DELETE with no origin, referer, or custom header", () => {
+      const result = validateCsrf(makeRequest("DELETE"));
+      expect(result).not.toBeNull();
+      expect(result!.status).toBe(403);
+    });
+
+    it("should allow POST with custom header but no origin or referer (e.g. curl)", () => {
+      const result = validateCsrf(
+        makeRequest("POST", { "x-omd-request": "1" })
+      );
       expect(result).toBeNull();
     });
 
-    it("should allow DELETE with no origin or referer", () => {
-      const result = validateCsrf(makeRequest("DELETE"));
+    it("should allow DELETE with custom header but no origin or referer", () => {
+      const result = validateCsrf(
+        makeRequest("DELETE", { "x-omd-request": "1" })
+      );
       expect(result).toBeNull();
     });
   });

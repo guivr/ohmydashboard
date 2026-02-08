@@ -38,8 +38,8 @@ const SECRET_PATTERNS = [
   /\b(whsec_[a-zA-Z0-9]{10,})\b/g,
   // Generic API keys (long alphanumeric strings after common key-like prefixes)
   /\b((?:api|key|token|secret|password|auth)[_-]?[a-zA-Z0-9]{20,})\b/gi,
-  // Bearer tokens
-  /Bearer\s+[a-zA-Z0-9._-]+/gi,
+  // Bearer tokens (including base64 chars +, /, =)
+  /Bearer\s+[a-zA-Z0-9._\-+/=]+/gi,
   // Long hex strings (potential keys, 32+ chars)
   /\b[0-9a-f]{32,}\b/gi,
 ];

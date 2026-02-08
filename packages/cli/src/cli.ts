@@ -140,14 +140,43 @@ async function defaultDownloadRepo(opts: {
   const url = buildTarballUrl(owner, repo, branch);
 
   await new Promise<void>((resolve, reject) => {
-    https.get(url, (res) => {
-      if (res.statusCode && res.statusCode >= 400) {
-        reject(new Error(`Failed to download repo (HTTP ${res.statusCode})`));
-        return;
-      }
-      const fileStream = fs.createWriteStream(tarPath);
-      pipeline(res, fileStream).then(resolve).catch(reject);
-    }).on("error", reject);
+    const MAX_REDIRECTS = 5;
+    const ALLOWED_HOSTS = ["codeload.github.com", "github.com", "objects.githubusercontent.com"];
+
+    function follow(currentUrl: string, redirectsLeft: number) {
+      https.get(currentUrl, (res) => {
+        // Follow 3xx redirects, validating the destination stays on GitHub
+        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          if (redirectsLeft <= 0) {
+            reject(new Error("Too many redirects while downloading repo"));
+            return;
+          }
+          const location = res.headers.location;
+          try {
+            const redirectHost = new URL(location).hostname;
+            if (!ALLOWED_HOSTS.includes(redirectHost)) {
+              reject(new Error(`Redirect to disallowed host: ${redirectHost}`));
+              return;
+            }
+          } catch {
+            reject(new Error("Invalid redirect URL"));
+            return;
+          }
+          res.resume(); // drain the response before following
+          follow(location, redirectsLeft - 1);
+          return;
+        }
+
+        if (res.statusCode && res.statusCode >= 400) {
+          reject(new Error(`Failed to download repo (HTTP ${res.statusCode})`));
+          return;
+        }
+        const fileStream = fs.createWriteStream(tarPath);
+        pipeline(res, fileStream).then(resolve).catch(reject);
+      }).on("error", reject);
+    }
+
+    follow(url, MAX_REDIRECTS);
   });
 
   const tar = await import("tar");

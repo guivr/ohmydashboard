@@ -3,7 +3,8 @@ import fs from "fs";
 import path from "path";
 
 const ALGORITHM = "aes-256-gcm";
-const IV_LENGTH = 16;
+const IV_LENGTH = 12; // 96 bits — NIST SP 800-38D recommended length for GCM
+const LEGACY_IV_LENGTH = 16; // Previous IV length, kept for backward compatibility
 const AUTH_TAG_LENGTH = 16;
 const KEY_LENGTH = 32; // 256 bits
 
@@ -25,14 +26,36 @@ export function getEncryptionKey(keyOverride?: Buffer): Buffer {
     fs.mkdirSync(KEY_DIR, { recursive: true });
   }
 
+  // Try to read an existing key first
   if (fs.existsSync(KEY_PATH)) {
     const stored = fs.readFileSync(KEY_PATH);
     if (stored.length === KEY_LENGTH) return stored;
+
+    // Key file exists but has wrong length — this indicates corruption.
+    // Throw rather than silently regenerating, which would permanently
+    // destroy access to all previously encrypted credentials.
+    throw new Error(
+      `Encryption key file is corrupted (expected ${KEY_LENGTH} bytes, got ${stored.length}). ` +
+      `Restore .ohmydashboard/.encryption_key from backup or delete it to start fresh (existing credentials will be lost).`
+    );
   }
 
-  // Generate a new key
+  // Generate a new key using exclusive-create to prevent TOCTOU race.
+  // If two processes race here, the second writeFileSync will throw EEXIST
+  // instead of silently overwriting the first process's key.
   const key = crypto.randomBytes(KEY_LENGTH);
-  fs.writeFileSync(KEY_PATH, key, { mode: 0o600 }); // Owner read/write only
+  try {
+    fs.writeFileSync(KEY_PATH, key, { flag: "wx", mode: 0o600 });
+  } catch (err: unknown) {
+    if (err && typeof err === "object" && "code" in err && err.code === "EEXIST") {
+      // Another process created the file between our existsSync and writeFileSync.
+      // Read the key they wrote instead.
+      const stored = fs.readFileSync(KEY_PATH);
+      if (stored.length === KEY_LENGTH) return stored;
+      throw new Error("Encryption key file created by concurrent process has invalid length");
+    }
+    throw err;
+  }
   return key;
 }
 
@@ -75,7 +98,9 @@ export function decrypt(encryptedData: string, keyOverride?: Buffer): string {
   const authTag = Buffer.from(parts[1], "hex");
   const ciphertext = parts[2];
 
-  if (iv.length !== IV_LENGTH) {
+  // Accept both current (12-byte) and legacy (16-byte) IV lengths
+  // so that data encrypted before the IV length change can still be decrypted.
+  if (iv.length !== IV_LENGTH && iv.length !== LEGACY_IV_LENGTH) {
     throw new Error("Invalid IV length");
   }
   if (authTag.length !== AUTH_TAG_LENGTH) {
@@ -101,8 +126,9 @@ export function isEncrypted(data: string): boolean {
   const parts = data.split(":");
   if (parts.length !== 3) return false;
 
-  // IV should be 32 hex chars (16 bytes), auth tag 32 hex chars (16 bytes)
-  if (parts[0].length !== IV_LENGTH * 2) return false;
+  // IV should be 24 hex chars (12 bytes) or 32 hex chars (16 bytes, legacy)
+  // Auth tag is always 32 hex chars (16 bytes)
+  if (parts[0].length !== IV_LENGTH * 2 && parts[0].length !== LEGACY_IV_LENGTH * 2) return false;
   if (parts[1].length !== AUTH_TAG_LENGTH * 2) return false;
 
   // All parts should be valid hex

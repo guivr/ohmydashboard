@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { metrics, accounts } from "@/lib/db/schema";
 import { eq, and, gte, lte, sql, desc, inArray, notInArray } from "drizzle-orm";
+import { validateDateString, validateAccountId } from "@/lib/security";
+
+const VALID_AGGREGATIONS = ["daily", "total"] as const;
 
 /**
  * GET /api/metrics
@@ -23,6 +26,36 @@ export async function GET(request: Request) {
   const from = searchParams.get("from");
   const to = searchParams.get("to");
   const aggregation = searchParams.get("aggregation") || "daily";
+
+  // ── Input validation ──
+  if (aggregation && !VALID_AGGREGATIONS.includes(aggregation as typeof VALID_AGGREGATIONS[number])) {
+    return NextResponse.json(
+      { error: `Invalid aggregation. Must be one of: ${VALID_AGGREGATIONS.join(", ")}` },
+      { status: 400 }
+    );
+  }
+
+  if (accountId) {
+    const err = validateAccountId(accountId);
+    if (err) return NextResponse.json({ error: err.message }, { status: 400 });
+  }
+
+  if (accountIds) {
+    const ids = accountIds.split(",").filter(Boolean);
+    for (const id of ids) {
+      const err = validateAccountId(id);
+      if (err) return NextResponse.json({ error: err.message }, { status: 400 });
+    }
+  }
+
+  if (from) {
+    const err = validateDateString("from", from);
+    if (err) return NextResponse.json({ error: err.message }, { status: 400 });
+  }
+  if (to) {
+    const err = validateDateString("to", to);
+    if (err) return NextResponse.json({ error: err.message }, { status: 400 });
+  }
 
   const db = getDb();
 

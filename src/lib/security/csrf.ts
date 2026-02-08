@@ -79,9 +79,21 @@ export function validateCsrf(request: Request): NextResponse | null {
   // - Server-to-server requests (fine for local use)
   // - Some browser privacy settings that strip headers
   // - Direct API tools like curl
-  // We allow these since this is a local app and the custom header
-  // provides the primary protection
-  return null;
+  //
+  // Without Origin/Referer, we MUST require the custom header as a fallback.
+  // Allowing requests with none of the three signals would let an attacker
+  // craft a cross-origin form POST that bypasses CSRF protection entirely
+  // (some browsers strip Origin/Referer on cross-scheme or privacy-mode
+  // navigations, and HTML forms with enctype="text/plain" can avoid
+  // triggering CORS preflight).
+  //
+  // Note on port checking: we intentionally allow any port on localhost/127.0.0.1
+  // since the app's port is user-configurable. This means other localhost services
+  // can make cross-origin requests, which is an accepted trade-off for a local app.
+  return NextResponse.json(
+    { error: "Forbidden: missing origin verification. Include the x-omd-request header." },
+    { status: 403 }
+  );
 }
 
 /**

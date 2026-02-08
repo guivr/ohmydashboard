@@ -196,12 +196,28 @@ describe("Input Validation", () => {
       expect(result).not.toBeNull();
     });
 
-    it("should reject invalid date values", () => {
+    it("should reject invalid date values (month 13)", () => {
       const result = validateDateString("date", "2025-13-45");
-      // This has valid format but invalid month/day — Date parsing may or may not catch it
-      // The pattern matches, so it depends on Date constructor behavior
-      // Either way, we just test it doesn't throw
-      expect(result === null || result !== null).toBe(true);
+      expect(result).not.toBeNull();
+      expect(result!.message).toContain("not a valid date");
+    });
+
+    it("should reject impossible calendar dates (Feb 30)", () => {
+      const result = validateDateString("date", "2025-02-30");
+      expect(result).not.toBeNull();
+      expect(result!.message).toContain("not a valid date");
+    });
+
+    it("should reject April 31", () => {
+      const result = validateDateString("date", "2025-04-31");
+      expect(result).not.toBeNull();
+      expect(result!.message).toContain("not a valid date");
+    });
+
+    it("should reject Feb 29 on non-leap year", () => {
+      const result = validateDateString("date", "2025-02-29");
+      expect(result).not.toBeNull();
+      expect(result!.message).toContain("not a valid date");
     });
 
     it("should use the field name in error messages", () => {
@@ -235,6 +251,28 @@ describe("Input Validation", () => {
     it("should reject ID exceeding 200 characters", () => {
       const result = validateAccountId("a".repeat(201));
       expect(result).not.toBeNull();
+    });
+
+    it("should reject ID with path traversal characters", () => {
+      const result = validateAccountId("../../../etc/passwd");
+      expect(result).not.toBeNull();
+      expect(result!.message).toContain("invalid characters");
+    });
+
+    it("should reject ID with HTML/script content", () => {
+      const result = validateAccountId("<script>alert(1)</script>");
+      expect(result).not.toBeNull();
+      expect(result!.message).toContain("invalid characters");
+    });
+
+    it("should reject ID with spaces", () => {
+      const result = validateAccountId("account 123");
+      expect(result).not.toBeNull();
+      expect(result!.message).toContain("invalid characters");
+    });
+
+    it("should accept ID with hyphens and underscores", () => {
+      expect(validateAccountId("acc_123-test")).toBeNull();
     });
   });
 });

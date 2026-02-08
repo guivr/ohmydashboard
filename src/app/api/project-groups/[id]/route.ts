@@ -124,29 +124,30 @@ export async function PUT(
       }
     }
 
-    // Delete existing members
-    db.delete(projectGroupMembers)
-      .where(eq(projectGroupMembers.groupId, id))
-      .run();
-
-    // Insert new members
-    for (const member of members as MemberInput[]) {
-      db.insert(projectGroupMembers)
-        .values({
-          id: generateSecureId(),
-          groupId: id,
-          accountId: member.accountId,
-          projectId: member.projectId ?? null,
-          createdAt: now,
-        })
+    // Replace members atomically — delete + reinsert in a single transaction
+    // so a crash or concurrent request can't leave the group in a partial state.
+    db.transaction((tx) => {
+      tx.delete(projectGroupMembers)
+        .where(eq(projectGroupMembers.groupId, id))
         .run();
-    }
 
-    // Touch updatedAt even if name wasn't changed
-    db.update(projectGroups)
-      .set({ updatedAt: now })
-      .where(eq(projectGroups.id, id))
-      .run();
+      for (const member of members as MemberInput[]) {
+        tx.insert(projectGroupMembers)
+          .values({
+            id: generateSecureId(),
+            groupId: id,
+            accountId: member.accountId,
+            projectId: member.projectId ?? null,
+            createdAt: now,
+          })
+          .run();
+      }
+
+      tx.update(projectGroups)
+        .set({ updatedAt: now })
+        .where(eq(projectGroups.id, id))
+        .run();
+    });
   }
 
   return NextResponse.json({ success: true });

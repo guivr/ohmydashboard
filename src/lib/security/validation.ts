@@ -112,9 +112,21 @@ export function validateDateString(
   if (!DATE_PATTERN.test(value)) {
     return { field, message: `${field} must be in YYYY-MM-DD format` };
   }
-  // Verify it's actually a valid date
-  const date = new Date(value);
-  if (isNaN(date.getTime())) {
+  // Verify it's actually a valid calendar date by round-tripping.
+  // JavaScript's Date constructor silently rolls over impossible dates
+  // (e.g. Feb 30 → Mar 2), so we parse and verify the components match.
+  const [yearStr, monthStr, dayStr] = value.split("-");
+  const year = parseInt(yearStr, 10);
+  const month = parseInt(monthStr, 10);
+  const day = parseInt(dayStr, 10);
+  // Use UTC to avoid timezone-related date shifts
+  const date = new Date(Date.UTC(year, month - 1, day));
+  if (
+    isNaN(date.getTime()) ||
+    date.getUTCFullYear() !== year ||
+    date.getUTCMonth() !== month - 1 ||
+    date.getUTCDate() !== day
+  ) {
     return { field, message: `${field} is not a valid date` };
   }
   return null;
@@ -122,6 +134,8 @@ export function validateDateString(
 
 /**
  * Validate an account ID string.
+ * Enforces safe characters to prevent injection via path traversal,
+ * HTML, or control characters.
  */
 export function validateAccountId(value: unknown): ValidationError | null {
   if (typeof value !== "string") {
@@ -129,6 +143,12 @@ export function validateAccountId(value: unknown): ValidationError | null {
   }
   if (value.length === 0 || value.length > 200) {
     return { field: "accountId", message: "Invalid account ID length" };
+  }
+  if (!ID_PATTERN.test(value)) {
+    return {
+      field: "accountId",
+      message: "Account ID contains invalid characters",
+    };
   }
   return null;
 }

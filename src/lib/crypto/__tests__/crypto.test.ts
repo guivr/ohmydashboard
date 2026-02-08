@@ -119,8 +119,8 @@ describe("Credential Encryption", () => {
 
       expect(parts).toHaveLength(3);
 
-      // IV = 16 bytes = 32 hex chars
-      expect(parts[0]).toHaveLength(32);
+      // IV = 12 bytes = 24 hex chars (NIST GCM recommended)
+      expect(parts[0]).toHaveLength(24);
       // Auth tag = 16 bytes = 32 hex chars
       expect(parts[1]).toHaveLength(32);
       // Ciphertext length varies

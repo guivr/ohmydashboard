@@ -154,28 +154,30 @@ export async function POST(request: Request) {
   const now = new Date().toISOString();
   const groupId = generateSecureId();
 
-  // Insert group
-  db.insert(projectGroups)
-    .values({
-      id: groupId,
-      name: (name as string).trim(),
-      createdAt: now,
-      updatedAt: now,
-    })
-    .run();
-
-  // Insert members
-  for (const member of members as MemberInput[]) {
-    db.insert(projectGroupMembers)
+  // Insert group + members atomically so a crash mid-way can't leave
+  // an orphaned group with partial members.
+  db.transaction((tx) => {
+    tx.insert(projectGroups)
       .values({
-        id: generateSecureId(),
-        groupId,
-        accountId: member.accountId,
-        projectId: member.projectId ?? null,
+        id: groupId,
+        name: (name as string).trim(),
         createdAt: now,
+        updatedAt: now,
       })
       .run();
-  }
+
+    for (const member of members as MemberInput[]) {
+      tx.insert(projectGroupMembers)
+        .values({
+          id: generateSecureId(),
+          groupId,
+          accountId: member.accountId,
+          projectId: member.projectId ?? null,
+          createdAt: now,
+        })
+        .run();
+    }
+  });
 
   return NextResponse.json({ id: groupId, name }, { status: 201 });
 }

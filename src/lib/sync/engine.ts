@@ -17,6 +17,15 @@ type Db = BetterSQLite3Database<typeof schema>;
 const RUNNING_SYNC_TTL_MS = 10 * 60 * 1000;
 
 /**
+ * In-memory lock to prevent concurrent syncs for the same account.
+ * The DB-based "running" check has a TOCTOU gap — two requests can both
+ * read "no running sync" before either inserts a row. This Set closes
+ * that gap for the single-process case (which is the only deployment
+ * model for this local-first app).
+ */
+const activeSyncs = new Set<string>();
+
+/**
  * Decrypt stored credentials.
  * Handles both encrypted (new) and plaintext JSON (legacy) formats gracefully.
  */
@@ -70,7 +79,18 @@ export async function syncAccount(
     };
   }
 
-  // Prevent overlapping syncs for the same account.
+  // ── Concurrency guard (in-memory + DB) ──
+  // The in-memory Set prevents the TOCTOU gap where two concurrent requests
+  // both read "no running sync" from the DB before either inserts a row.
+  if (activeSyncs.has(accountId)) {
+    return {
+      success: false,
+      recordsProcessed: 0,
+      error: "Sync already running",
+    };
+  }
+
+  // Also check the DB for stale "running" syncs from a previous process crash.
   const runningLog = database
     .select()
     .from(syncLogs)
@@ -103,75 +123,146 @@ export async function syncAccount(
       .run();
   }
 
-  // Get the integration definition
-  const integration = getIntegration(account.integrationId);
-  if (!integration) {
-    return {
-      success: false,
-      recordsProcessed: 0,
-      error: `Integration "${account.integrationId}" not found`,
-    };
-  }
-
-  // Create a sync log entry
-  const syncLogId = generateSecureId();
-  const startedAt = new Date().toISOString();
-
-  database
-    .insert(syncLogs)
-    .values({
-      id: syncLogId,
-      accountId,
-      status: "running",
-      startedAt,
-    })
-    .run();
+  // Acquire the lock before inserting the sync log row.
+  activeSyncs.add(accountId);
 
   try {
-    startSyncProgress(accountId);
-    // Get last successful sync date for incremental sync (skip if fullSync)
-    let since: Date | undefined;
-    if (options?.from) {
-      since = options.from;
-    } else if (!options?.fullSync) {
-      const lastSync = database
-        .select()
-        .from(syncLogs)
-        .where(
-          and(
-            eq(syncLogs.accountId, accountId),
-            eq(syncLogs.status, "success")
-          )
-        )
-        .orderBy(desc(syncLogs.startedAt))
-        .limit(1)
-        .get();
-
-      since = lastSync?.completedAt
-        ? new Date(lastSync.completedAt)
-        : undefined;
+    // Get the integration definition
+    const integration = getIntegration(account.integrationId);
+    if (!integration) {
+      return {
+        success: false,
+        recordsProcessed: 0,
+        error: `Integration "${account.integrationId}" not found`,
+      };
     }
 
-    // Decrypt credentials before passing to the fetcher
-    const credentials = decryptCredentials(account.credentials);
+    // Create a sync log entry
+    const syncLogId = generateSecureId();
+    const startedAt = new Date().toISOString();
 
-    // Run the integration's fetcher
-    const result = await integration.fetcher.sync(
-      {
-        id: account.id,
-        integrationId: account.integrationId,
-        label: account.label,
-        credentials,
-      },
-      since,
-      (step) => appendSyncStep(accountId, step)
-    );
+    database
+      .insert(syncLogs)
+      .values({
+        id: syncLogId,
+        accountId,
+        status: "running",
+        startedAt,
+      })
+      .run();
 
-    if (!result.success) {
-      const safeError = result.error
-        ? sanitizeErrorMessage(result.error)
-        : "Sync failed";
+    try {
+      startSyncProgress(accountId);
+      // Get last successful sync date for incremental sync (skip if fullSync)
+      let since: Date | undefined;
+      if (options?.from) {
+        since = options.from;
+      } else if (!options?.fullSync) {
+        const lastSync = database
+          .select()
+          .from(syncLogs)
+          .where(
+            and(
+              eq(syncLogs.accountId, accountId),
+              eq(syncLogs.status, "success")
+            )
+          )
+          .orderBy(desc(syncLogs.startedAt))
+          .limit(1)
+          .get();
 
+        since = lastSync?.completedAt
+          ? new Date(lastSync.completedAt)
+          : undefined;
+      }
+
+      // Decrypt credentials before passing to the fetcher
+      const credentials = decryptCredentials(account.credentials);
+
+      // Run the integration's fetcher
+      const result = await integration.fetcher.sync(
+        {
+          id: account.id,
+          integrationId: account.integrationId,
+          label: account.label,
+          credentials,
+        },
+        since,
+        (step) => appendSyncStep(accountId, step)
+      );
+
+      if (!result.success) {
+        const safeError = result.error
+          ? sanitizeErrorMessage(result.error)
+          : "Sync failed";
+
+        const completedAt = new Date().toISOString();
+
+        database
+          .update(syncLogs)
+          .set({
+            status: "error",
+            completedAt,
+            error: safeError,
+            recordsProcessed: 0,
+          })
+          .where(eq(syncLogs.id, syncLogId))
+          .run();
+
+        finalizeSyncProgress(accountId, {
+          success: false,
+          recordsProcessed: 0,
+          error: safeError,
+          completedAt,
+          steps: result.steps,
+        });
+
+        return {
+          success: false,
+          recordsProcessed: 0,
+          error: safeError,
+          steps: result.steps,
+          startedAt,
+          completedAt,
+        };
+      }
+
+      // Store normalized metrics
+      if (result.metrics.length > 0) {
+        storeMetrics(database, accountId, result.metrics);
+      }
+
+      // Mark sync as successful
+      const completedAt = new Date().toISOString();
+
+      database
+        .update(syncLogs)
+        .set({
+          status: "success",
+          completedAt,
+          recordsProcessed: result.recordsProcessed,
+        })
+        .where(eq(syncLogs.id, syncLogId))
+        .run();
+
+      finalizeSyncProgress(accountId, {
+        success: true,
+        recordsProcessed: result.recordsProcessed,
+        completedAt,
+        steps: result.steps,
+      });
+
+      return {
+        success: true,
+        recordsProcessed: result.recordsProcessed,
+        steps: result.steps,
+        startedAt,
+        completedAt,
+      };
+    } catch (error) {
+      const rawMessage =
+        error instanceof Error ? error.message : "Unknown error";
+      const safeError = sanitizeErrorMessage(rawMessage);
       const completedAt = new Date().toISOString();
 
       database
@@ -180,7 +271,6 @@ export async function syncAccount(
           status: "error",
           completedAt,
           error: safeError,
-          recordsProcessed: 0,
         })
         .where(eq(syncLogs.id, syncLogId))
         .run();
@@ -190,81 +280,18 @@ export async function syncAccount(
         recordsProcessed: 0,
         error: safeError,
         completedAt,
-        steps: result.steps,
       });
 
       return {
         success: false,
         recordsProcessed: 0,
         error: safeError,
-        steps: result.steps,
         startedAt,
         completedAt,
       };
     }
-
-    // Store normalized metrics
-    if (result.metrics.length > 0) {
-      storeMetrics(database, accountId, result.metrics);
-    }
-
-    // Mark sync as successful
-    const completedAt = new Date().toISOString();
-
-    database
-      .update(syncLogs)
-      .set({
-        status: "success",
-        completedAt,
-        recordsProcessed: result.recordsProcessed,
-      })
-      .where(eq(syncLogs.id, syncLogId))
-      .run();
-
-    finalizeSyncProgress(accountId, {
-      success: true,
-      recordsProcessed: result.recordsProcessed,
-      completedAt,
-      steps: result.steps,
-    });
-
-    return {
-      success: true,
-      recordsProcessed: result.recordsProcessed,
-      steps: result.steps,
-      startedAt,
-      completedAt,
-    };
-  } catch (error) {
-    const rawMessage =
-      error instanceof Error ? error.message : "Unknown error";
-    const safeError = sanitizeErrorMessage(rawMessage);
-    const completedAt = new Date().toISOString();
-
-    database
-      .update(syncLogs)
-      .set({
-        status: "error",
-        completedAt,
-        error: safeError,
-      })
-      .where(eq(syncLogs.id, syncLogId))
-      .run();
-
-    finalizeSyncProgress(accountId, {
-      success: false,
-      recordsProcessed: 0,
-      error: safeError,
-      completedAt,
-    });
-
-    return {
-      success: false,
-      recordsProcessed: 0,
-      error: safeError,
-      startedAt,
-      completedAt,
-    };
+  } finally {
+    activeSyncs.delete(accountId);
   }
 }
 

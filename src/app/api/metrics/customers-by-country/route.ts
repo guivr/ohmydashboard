@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
 import { metrics, accounts, projects } from "@/lib/db/schema";
 import { eq, and, gte, lte, sql, inArray } from "drizzle-orm";
+import { validateDateString, validateAccountId } from "@/lib/security";
+
+const VALID_TYPES = ["paying", "all"] as const;
 
 /**
  * GET /api/metrics/customers-by-country
@@ -28,6 +31,31 @@ export async function GET(request: Request) {
   const from = searchParams.get("from");
   const to = searchParams.get("to");
   const type = searchParams.get("type") ?? "paying";
+
+  // ── Input validation ──
+  if (!VALID_TYPES.includes(type as typeof VALID_TYPES[number])) {
+    return NextResponse.json(
+      { error: `Invalid type. Must be one of: ${VALID_TYPES.join(", ")}` },
+      { status: 400 }
+    );
+  }
+
+  if (accountIds) {
+    const ids = accountIds.split(",").filter(Boolean);
+    for (const id of ids) {
+      const err = validateAccountId(id);
+      if (err) return NextResponse.json({ error: err.message }, { status: 400 });
+    }
+  }
+
+  if (from) {
+    const err = validateDateString("from", from);
+    if (err) return NextResponse.json({ error: err.message }, { status: 400 });
+  }
+  if (to) {
+    const err = validateDateString("to", to);
+    if (err) return NextResponse.json({ error: err.message }, { status: 400 });
+  }
 
   const db = getDb();
 
