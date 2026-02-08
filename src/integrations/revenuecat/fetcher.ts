@@ -1,5 +1,6 @@
 import { addDays, format, subDays } from "date-fns";
 import type { AccountConfig, DataFetcher, NormalizedMetric, SyncResult, SyncStep } from "../types";
+import { resolveCountryCode } from "@/lib/countries";
 
 const REVENUECAT_API_BASE = "https://api.revenuecat.com/v2";
 
@@ -432,6 +433,128 @@ function normalizeSegmentedRevenueData(
 }
 
 /**
+ * Resolve a RevenueCat segment to an ISO alpha-2 country code.
+ * Handles both v2 segments (which have an `id` like "US") and v3 segments
+ * (which only have `display_name` like "United States").
+ *
+ * Delegates to the shared `resolveCountryCode` utility which uses
+ * `i18n-iso-countries` for comprehensive name → code mapping.
+ */
+function resolveSegmentCountryCode(segment: { id?: string; display_name: string }): string {
+  // v2 format: segment.id is already the ISO code
+  if (segment.id && /^[A-Z]{2}$/i.test(segment.id)) {
+    return segment.id.toUpperCase();
+  }
+
+  // v3 format: resolve display_name via shared utility
+  return resolveCountryCode(segment.display_name);
+}
+
+/**
+ * Normalize country-segmented chart data into per-country daily metrics.
+ *
+ * Handles two response formats:
+ *
+ * **v2 (legacy):** `values` is `[timestamp, seg0_val, seg1_val, ...]` arrays.
+ *   Segments have `{ id: "US", display_name: "United States" }`.
+ *
+ * **v3 (realtime):** `values` is `{ cohort, segment, measure, value }` objects.
+ *   Segments have `{ display_name: "United States", is_total: true|false }`.
+ *   `segment` in each value is the index into the segments array.
+ *
+ * We emit one metric per country per day, using the given `metricType`.
+ */
+function normalizeCountrySegmentedData(
+  chartData: RevenueCatChartData,
+  startDate: Date,
+  endDate: Date,
+  metricType: string = "new_customers_by_country"
+): NormalizedMetric[] {
+  const segments = chartData.segments ?? [];
+  if (segments.length === 0 || !chartData.values || chartData.values.length === 0) {
+    return [];
+  }
+
+  // Pre-resolve segment indices to country codes, skipping "Total" segments
+  const segmentCountryCodes: (string | null)[] = segments.map((seg, idx) => {
+    const isTotal = "is_total" in seg && (seg as any).is_total;
+    const resolved = resolveSegmentCountryCode(seg as { id?: string; display_name: string });
+    if (isTotal) return null;
+    return resolved;
+  });
+
+  const metrics: NormalizedMetric[] = [];
+  const bufferEnd = addDays(endDate, 1);
+
+  // Detect format: v3 objects have a "cohort" field, v2 are arrays
+  const firstValue = chartData.values[0];
+  const isV3 = !Array.isArray(firstValue) && typeof firstValue === "object" && "cohort" in firstValue;
+
+  if (isV3) {
+    // ── v3 realtime format: { cohort, segment, measure, value } ──
+    for (const dataPoint of chartData.values) {
+      const point = dataPoint as { cohort: number; segment: number; measure?: number; value: number | null; incomplete?: boolean };
+      if (point.value === null || point.value === undefined || point.value === 0) {
+        continue;
+      }
+
+      const segIdx = point.segment;
+      if (segIdx < 0 || segIdx >= segmentCountryCodes.length) {
+        continue;
+      }
+      const countryCode = segmentCountryCodes[segIdx];
+      if (!countryCode) {
+        continue; // skip "Total" segments
+      }
+
+      const normalizedTs = point.cohort < 1_000_000_000_000 ? point.cohort * 1000 : point.cohort;
+      const date = new Date(normalizedTs);
+      if (date.getFullYear() < 2000 || date > bufferEnd) {
+        continue;
+      }
+
+      const metric = {
+        metricType,
+        value: point.value,
+        date: format(date, "yyyy-MM-dd"),
+        metadata: { country: countryCode },
+      };
+      metrics.push(metric);
+    }
+  } else {
+    // ── v2 array format: [timestamp, seg0_val, seg1_val, ...] ──
+    for (const dataPoint of chartData.values) {
+      if (!Array.isArray(dataPoint)) continue;
+      const row = dataPoint as (number | null)[];
+      const timestamp = row[0];
+      if (timestamp === null || timestamp === undefined) continue;
+
+      const normalizedTs = timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp;
+      const date = new Date(normalizedTs);
+      if (date.getFullYear() < 2000 || date > bufferEnd) continue;
+
+      const dateStr = format(date, "yyyy-MM-dd");
+
+      for (let i = 0; i < segments.length; i++) {
+        const val = row[i + 1];
+        if (val === null || val === undefined || val === 0) continue;
+        const countryCode = segmentCountryCodes[i];
+        if (!countryCode) continue;
+
+        metrics.push({
+          metricType,
+          value: val,
+          date: dateStr,
+          metadata: { country: countryCode },
+        });
+      }
+    }
+  }
+
+  return metrics;
+}
+
+/**
  * Discover which segment ID (if any) is available on the revenue chart for
  * splitting by product type. Returns the first match from
  * REVENUE_SEGMENT_CANDIDATES, or null if none is available.
@@ -614,6 +737,141 @@ export const revenuecatFetcher: DataFetcher = {
         steps.push(step);
         reportStep?.(step);
       }
+    }
+
+    // ── Step 4: Fetch customers_new segmented by country ──
+    const t0Country = Date.now();
+    try {
+      const countryOptions = await fetchChartOptions(account.credentials, "customers_new");
+      const hasCountrySegment = countryOptions.segments.some(
+        (s) => s.id.toLowerCase() === "country"
+      );
+
+      if (hasCountrySegment) {
+        const countryData = await fetchChart(
+          account.credentials, "customers_new", startDate, endDate, "country"
+        );
+
+        if (countryData.segments && countryData.segments.length > 0 && countryData.values) {
+          const countryMetrics = normalizeCountrySegmentedData(countryData, startDate, endDate);
+          allMetrics.push(...countryMetrics);
+
+          const step: SyncStep = {
+            key: "fetch_customers_by_country",
+            label: "Fetch new customers by country",
+            status: "success",
+            recordCount: countryMetrics.length,
+            durationMs: Date.now() - t0Country,
+          };
+          steps.push(step);
+          reportStep?.(step);
+        } else {
+          const step: SyncStep = {
+            key: "fetch_customers_by_country",
+            label: "Fetch new customers by country",
+            status: "skipped",
+            durationMs: Date.now() - t0Country,
+            error: "No country segments returned",
+          };
+          steps.push(step);
+          reportStep?.(step);
+        }
+      } else {
+        const step: SyncStep = {
+          key: "fetch_customers_by_country",
+          label: "Fetch new customers by country",
+          status: "skipped",
+          durationMs: Date.now() - t0Country,
+          error: "Country segment not available on customers_new chart",
+        };
+        steps.push(step);
+        reportStep?.(step);
+      }
+    } catch (error) {
+      const step: SyncStep = {
+        key: "fetch_customers_by_country",
+        label: "Fetch new customers by country",
+        status: "error",
+        durationMs: Date.now() - t0Country,
+        error: error instanceof Error ? error.message : "Failed to fetch country data",
+      };
+      steps.push(step);
+      reportStep?.(step);
+    }
+
+    // ── Step 5: Fetch active subscriptions segmented by first_country ──
+    // This gives us paying customers by country (active = paid or grace period).
+    const t0Paying = Date.now();
+    try {
+      const activesOptions = await fetchChartOptions(account.credentials, "actives");
+      const hasFirstCountrySegment = activesOptions.segments.some(
+        (s) => s.id.toLowerCase() === "first_country"
+      );
+
+      if (hasFirstCountrySegment) {
+        const activesCountryData = await fetchChart(
+          account.credentials, "actives", startDate, endDate, "first_country"
+        );
+
+        if (activesCountryData.segments && activesCountryData.segments.length > 0 && activesCountryData.values) {
+          const allPayingMetrics = normalizeCountrySegmentedData(
+            activesCountryData, startDate, endDate, "paying_customers_by_country"
+          );
+
+          // `actives` is a stock metric (snapshot of currently active subscribers),
+          // NOT a flow metric like new_customers. Summing across days would inflate
+          // the count (the same subscriber appears every day). We only keep the
+          // latest date's values — that's the current subscriber count per country.
+          const latestDate = allPayingMetrics.reduce(
+            (max, m) => (m.date > max ? m.date : max), ""
+          );
+          const payingMetrics = latestDate
+            ? allPayingMetrics.filter((m) => m.date === latestDate)
+            : [];
+
+          allMetrics.push(...payingMetrics);
+
+          const step: SyncStep = {
+            key: "fetch_paying_customers_by_country",
+            label: "Fetch paying customers by country",
+            status: "success",
+            recordCount: payingMetrics.length,
+            durationMs: Date.now() - t0Paying,
+          };
+          steps.push(step);
+          reportStep?.(step);
+        } else {
+          const step: SyncStep = {
+            key: "fetch_paying_customers_by_country",
+            label: "Fetch paying customers by country",
+            status: "skipped",
+            durationMs: Date.now() - t0Paying,
+            error: "No country segments returned from actives chart",
+          };
+          steps.push(step);
+          reportStep?.(step);
+        }
+      } else {
+        const step: SyncStep = {
+          key: "fetch_paying_customers_by_country",
+          label: "Fetch paying customers by country",
+          status: "skipped",
+          durationMs: Date.now() - t0Paying,
+          error: "first_country segment not available on actives chart",
+        };
+        steps.push(step);
+        reportStep?.(step);
+      }
+    } catch (error) {
+      const step: SyncStep = {
+        key: "fetch_paying_customers_by_country",
+        label: "Fetch paying customers by country",
+        status: "error",
+        durationMs: Date.now() - t0Paying,
+        error: error instanceof Error ? error.message : "Failed to fetch paying country data",
+      };
+      steps.push(step);
+      reportStep?.(step);
     }
 
     // Check if we got any metrics

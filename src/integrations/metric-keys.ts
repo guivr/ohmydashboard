@@ -83,6 +83,18 @@ export const METRIC_KEYS = {
     format: "number" as const,
     description: "Number of new customers",
   },
+  new_customers_by_country: {
+    key: "new_customers_by_country",
+    label: "New Customers by Country",
+    format: "number" as const,
+    description: "Number of new customers broken down by country",
+  },
+  paying_customers_by_country: {
+    key: "paying_customers_by_country",
+    label: "Paying Customers by Country",
+    format: "number" as const,
+    description: "Number of paying customers broken down by country",
+  },
   sales_count: {
     key: "sales_count",
     label: "Sales",

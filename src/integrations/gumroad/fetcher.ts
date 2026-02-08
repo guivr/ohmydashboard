@@ -36,6 +36,10 @@ interface GumroadSale {
   recurring_charge?: boolean;
   /** Buyer email — used to count unique new customers */
   email?: string;
+  /** Full country name, e.g. "United States" */
+  country?: string;
+  /** ISO 3166-1 alpha-2 country code, e.g. "US" */
+  country_iso2?: string;
 }
 
 /** Tier pricing for a specific recurrence within a variant option */
@@ -290,6 +294,10 @@ function computeSalesMetrics(
   // New customers: unique emails per day, excluding recurring charges
   // (recurring_charge = true means a subscription renewal, not a new customer)
   const newCustomersByDay = new Map<string, Set<string>>();
+  // Per-country per-product new customers: day -> country -> productId -> Set<email>
+  const newCustomersByDayCountryProduct = new Map<
+    string, Map<string, Map<string, { emails: Set<string>; productName: string }>>
+  >();
 
   for (const sale of sales) {
     if (sale.refunded || sale.chargedback) continue;
@@ -346,6 +354,20 @@ function computeSalesMetrics(
     if (!sale.recurring_charge && sale.email) {
       if (!newCustomersByDay.has(date)) newCustomersByDay.set(date, new Set());
       newCustomersByDay.get(date)!.add(sale.email);
+
+      // Track per-country per-product
+      const country = sale.country_iso2?.toUpperCase() || "Unknown";
+      if (!newCustomersByDayCountryProduct.has(date)) {
+        newCustomersByDayCountryProduct.set(date, new Map());
+      }
+      const countryMap = newCustomersByDayCountryProduct.get(date)!;
+      if (!countryMap.has(country)) countryMap.set(country, new Map());
+      const productMap = countryMap.get(country)!;
+      const productName = product?.name ?? sale.product_name;
+      if (!productMap.has(sale.product_id)) {
+        productMap.set(sale.product_id, { emails: new Set(), productName });
+      }
+      productMap.get(sale.product_id)!.emails.add(sale.email);
     }
   }
 
@@ -448,6 +470,31 @@ function computeSalesMetrics(
       value: emails.size,
       date,
     });
+  }
+
+  // New customers per day per country per product — Gumroad customers are
+  // inherently paying (derived from sales), so we emit both metrics.
+  for (const [date, countryMap] of newCustomersByDayCountryProduct) {
+    for (const [country, productMap] of countryMap) {
+      for (const [productId, { emails, productName }] of productMap) {
+        allMetrics.push(
+          {
+            metricType: "new_customers_by_country",
+            value: emails.size,
+            date,
+            projectId: productId,
+            metadata: { country, product_name: productName },
+          },
+          {
+            metricType: "paying_customers_by_country",
+            value: emails.size,
+            date,
+            projectId: productId,
+            metadata: { country, product_name: productName },
+          },
+        );
+      }
+    }
   }
 
   return allMetrics;

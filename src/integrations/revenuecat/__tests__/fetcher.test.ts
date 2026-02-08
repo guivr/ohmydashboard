@@ -605,5 +605,655 @@ describe("RevenueCat Fetcher", () => {
       const splitStep = result.steps?.find((s) => s.key === "split_revenue_segmented");
       expect(splitStep?.status).toBe("error");
     });
+
+    // ── Country segmentation (Step 4) ─────────────────────────────────────
+
+    describe("country segmentation", () => {
+      it("fetches customers_new by country with v3 format", async () => {
+        const mockDate1 = new Date("2025-01-10T00:00:00Z").getTime();
+        const mockDate2 = new Date("2025-01-11T00:00:00Z").getTime();
+
+        mockFetch
+          // Mock 1: chart options for revenue (no product_duration_type)
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createOptionsNoSegment()),
+          })
+          // Mock 2-7: standard chart data (6 charts)
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("mrr", [[mockDate1, 5000]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("revenue", [[mockDate1, 10000]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("actives", [[mockDate1, 100]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("trials", [[mockDate1, 50]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("customers_new", [[mockDate1, 10]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("customers_active", [[mockDate1, 200]])),
+          })
+          // Mock 8: chart options for customers_new (has "country" segment)
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({
+              object: "chart_options",
+              resolutions: [{ id: "0", display_name: "day" }],
+              segments: [
+                { id: "country", display_name: "Country" },
+                { id: "store", display_name: "Store" },
+              ],
+              filters: [],
+            }),
+          })
+          // Mock 9: country-segmented customers_new (v3 format)
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({
+              object: "chart_data",
+              category: "customers_new",
+              display_type: "line",
+              display_name: "New Customers",
+              description: "New customers by country",
+              resolution: "day",
+              segments: [
+                { display_name: "Total", is_total: true },
+                { display_name: "United States", is_total: false },
+                { display_name: "Germany", is_total: false },
+                { display_name: "Unknown", is_total: false },
+              ],
+              values: [
+                // Total segment (index 0) — should be skipped
+                { cohort: mockDate1, segment: 0, value: 10 },
+                // United States (index 1)
+                { cohort: mockDate1, segment: 1, value: 5 },
+                // Germany (index 2)
+                { cohort: mockDate1, segment: 2, value: 3 },
+                // Unknown (index 3)
+                { cohort: mockDate1, segment: 3, value: 2 },
+                // Day 2
+                { cohort: mockDate2, segment: 0, value: 7 },
+                { cohort: mockDate2, segment: 1, value: 4 },
+                { cohort: mockDate2, segment: 2, value: 3 },
+              ],
+              start_date: mockDate1,
+              end_date: mockDate2,
+            }),
+          });
+
+        const sinceDate = new Date("2025-01-10T00:00:00Z");
+        const result = await revenuecatFetcher.sync(mockAccount, sinceDate);
+
+        expect(result.success).toBe(true);
+
+        const countryMetrics = result.metrics.filter(
+          (m) => m.metricType === "new_customers_by_country"
+        );
+
+        // 5 data points: US day1, DE day1, Unknown day1, US day2, DE day2
+        // (Total segments are skipped, zero values are skipped)
+        expect(countryMetrics).toHaveLength(5);
+
+        // Check US metrics
+        const usDay1 = countryMetrics.find(
+          (m) => m.metadata?.country === "US" && m.date === "2025-01-10"
+        );
+        expect(usDay1?.value).toBe(5);
+
+        const usDay2 = countryMetrics.find(
+          (m) => m.metadata?.country === "US" && m.date === "2025-01-11"
+        );
+        expect(usDay2?.value).toBe(4);
+
+        // Check Germany metrics (display_name "Germany" → "DE")
+        const deDay1 = countryMetrics.find(
+          (m) => m.metadata?.country === "DE" && m.date === "2025-01-10"
+        );
+        expect(deDay1?.value).toBe(3);
+
+        // Check Unknown
+        const unknownDay1 = countryMetrics.find(
+          (m) => m.metadata?.country === "Unknown" && m.date === "2025-01-10"
+        );
+        expect(unknownDay1?.value).toBe(2);
+
+        // Verify step reported correctly
+        const countryStep = result.steps?.find(
+          (s) => s.key === "fetch_customers_by_country"
+        );
+        expect(countryStep?.status).toBe("success");
+        expect(countryStep?.recordCount).toBe(5);
+      });
+
+      it("fetches customers_new by country with v2 array format", async () => {
+        const mockDate1 = new Date("2025-01-10T00:00:00Z").getTime();
+        // Use seconds for v2 format
+        const mockDate1Sec = mockDate1 / 1000;
+
+        mockFetch
+          // Mock 1: chart options for revenue (no segment)
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createOptionsNoSegment()),
+          })
+          // Mock 2-7: standard charts
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("mrr", [[mockDate1, 5000]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("revenue", [[mockDate1, 10000]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("actives", [[mockDate1, 100]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("trials", [[mockDate1, 50]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("customers_new", [[mockDate1, 10]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("customers_active", [[mockDate1, 200]])),
+          })
+          // Mock 8: chart options for customers_new
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({
+              object: "chart_options",
+              resolutions: [{ id: "0", display_name: "day" }],
+              segments: [{ id: "country", display_name: "Country" }],
+              filters: [],
+            }),
+          })
+          // Mock 9: country-segmented data (v2 array format with ISO segment IDs)
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({
+              object: "chart_data",
+              category: "customers_new",
+              display_type: "line",
+              display_name: "New Customers",
+              description: "New customers",
+              resolution: "day",
+              segments: [
+                { id: "US", display_name: "United States" },
+                { id: "BR", display_name: "Brazil" },
+              ],
+              // v2 format: [timestamp, seg0_val, seg1_val]
+              values: [
+                [mockDate1Sec, 7, 3],
+              ],
+              start_date: mockDate1Sec,
+              end_date: mockDate1Sec,
+            }),
+          });
+
+        const sinceDate = new Date("2025-01-10T00:00:00Z");
+        const result = await revenuecatFetcher.sync(mockAccount, sinceDate);
+
+        expect(result.success).toBe(true);
+
+        const countryMetrics = result.metrics.filter(
+          (m) => m.metricType === "new_customers_by_country"
+        );
+
+        expect(countryMetrics).toHaveLength(2);
+
+        const us = countryMetrics.find((m) => m.metadata?.country === "US");
+        expect(us?.value).toBe(7);
+        expect(us?.date).toBe("2025-01-10");
+
+        const br = countryMetrics.find((m) => m.metadata?.country === "BR");
+        expect(br?.value).toBe(3);
+      });
+
+      it("skips zero and null values in country data", async () => {
+        const mockDate1 = new Date("2025-01-10T00:00:00Z").getTime();
+
+        mockFetch
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createOptionsNoSegment()),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("mrr", [[mockDate1, 5000]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("revenue", [[mockDate1, 10000]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("actives", [[mockDate1, 100]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("trials", [[mockDate1, 50]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("customers_new", [[mockDate1, 10]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("customers_active", [[mockDate1, 200]])),
+          })
+          // Chart options for customers_new
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({
+              object: "chart_options",
+              resolutions: [{ id: "0", display_name: "day" }],
+              segments: [{ id: "country", display_name: "Country" }],
+              filters: [],
+            }),
+          })
+          // v3 country data with zeros and nulls
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({
+              object: "chart_data",
+              category: "customers_new",
+              display_type: "line",
+              display_name: "New Customers",
+              description: "New customers",
+              resolution: "day",
+              segments: [
+                { display_name: "United States", is_total: false },
+                { display_name: "Japan", is_total: false },
+                { display_name: "France", is_total: false },
+              ],
+              values: [
+                { cohort: mockDate1, segment: 0, value: 5 },
+                { cohort: mockDate1, segment: 1, value: 0 },       // zero → skipped
+                { cohort: mockDate1, segment: 2, value: null },     // null → skipped
+              ],
+              start_date: mockDate1,
+              end_date: mockDate1,
+            }),
+          });
+
+        const sinceDate = new Date("2025-01-10T00:00:00Z");
+        const result = await revenuecatFetcher.sync(mockAccount, sinceDate);
+
+        const countryMetrics = result.metrics.filter(
+          (m) => m.metricType === "new_customers_by_country"
+        );
+
+        // Only US should appear (Japan=0 and France=null skipped)
+        expect(countryMetrics).toHaveLength(1);
+        expect(countryMetrics[0].metadata?.country).toBe("US");
+        expect(countryMetrics[0].value).toBe(5);
+      });
+
+      it("skips country step when country segment is not available", async () => {
+        const mockDate1 = new Date("2025-01-10T00:00:00Z").getTime();
+
+        mockFetch
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createOptionsNoSegment()),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("mrr", [[mockDate1, 5000]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("revenue", [[mockDate1, 10000]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("actives", [[mockDate1, 100]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("trials", [[mockDate1, 50]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("customers_new", [[mockDate1, 10]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("customers_active", [[mockDate1, 200]])),
+          })
+          // Chart options for customers_new — no "country" segment
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({
+              object: "chart_options",
+              resolutions: [{ id: "0", display_name: "day" }],
+              segments: [
+                { id: "store", display_name: "Store" },
+              ],
+              filters: [],
+            }),
+          });
+
+        const sinceDate = new Date("2025-01-10T00:00:00Z");
+        const result = await revenuecatFetcher.sync(mockAccount, sinceDate);
+
+        expect(result.success).toBe(true);
+
+        const countryMetrics = result.metrics.filter(
+          (m) => m.metricType === "new_customers_by_country"
+        );
+        expect(countryMetrics).toHaveLength(0);
+
+        const countryStep = result.steps?.find(
+          (s) => s.key === "fetch_customers_by_country"
+        );
+        expect(countryStep?.status).toBe("skipped");
+        expect(countryStep?.error).toContain("Country segment not available");
+      });
+
+      it("reports error step when country fetch fails", async () => {
+        const mockDate1 = new Date("2025-01-10T00:00:00Z").getTime();
+
+        mockFetch
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createOptionsNoSegment()),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("mrr", [[mockDate1, 5000]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("revenue", [[mockDate1, 10000]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("actives", [[mockDate1, 100]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("trials", [[mockDate1, 50]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("customers_new", [[mockDate1, 10]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("customers_active", [[mockDate1, 200]])),
+          })
+          // Chart options fetch for customers_new fails
+          .mockRejectedValueOnce(new Error("Rate limited"));
+
+        const sinceDate = new Date("2025-01-10T00:00:00Z");
+        const result = await revenuecatFetcher.sync(mockAccount, sinceDate);
+
+        // Overall sync still succeeds (country is optional)
+        expect(result.success).toBe(true);
+
+        const countryStep = result.steps?.find(
+          (s) => s.key === "fetch_customers_by_country"
+        );
+        expect(countryStep?.status).toBe("error");
+        expect(countryStep?.error).toContain("Rate limited");
+      });
+
+      it("skips country step when segmented data has empty segments", async () => {
+        const mockDate1 = new Date("2025-01-10T00:00:00Z").getTime();
+
+        mockFetch
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createOptionsNoSegment()),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("mrr", [[mockDate1, 5000]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("revenue", [[mockDate1, 10000]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("actives", [[mockDate1, 100]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("trials", [[mockDate1, 50]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("customers_new", [[mockDate1, 10]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("customers_active", [[mockDate1, 200]])),
+          })
+          // Chart options — has "country" segment
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({
+              object: "chart_options",
+              resolutions: [{ id: "0", display_name: "day" }],
+              segments: [{ id: "country", display_name: "Country" }],
+              filters: [],
+            }),
+          })
+          // Segmented data returns empty segments array
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({
+              object: "chart_data",
+              category: "customers_new",
+              display_type: "line",
+              display_name: "New Customers",
+              description: "New customers",
+              resolution: "day",
+              segments: [],
+              values: [],
+              start_date: mockDate1,
+              end_date: mockDate1,
+            }),
+          });
+
+        const sinceDate = new Date("2025-01-10T00:00:00Z");
+        const result = await revenuecatFetcher.sync(mockAccount, sinceDate);
+
+        expect(result.success).toBe(true);
+
+        const countryMetrics = result.metrics.filter(
+          (m) => m.metricType === "new_customers_by_country"
+        );
+        expect(countryMetrics).toHaveLength(0);
+
+        const countryStep = result.steps?.find(
+          (s) => s.key === "fetch_customers_by_country"
+        );
+        expect(countryStep?.status).toBe("skipped");
+        expect(countryStep?.error).toContain("No country segments");
+      });
+
+      it("resolves non-standard country names from RevenueCat", async () => {
+        const mockDate1 = new Date("2025-01-10T00:00:00Z").getTime();
+
+        mockFetch
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createOptionsNoSegment()),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("mrr", [[mockDate1, 5000]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("revenue", [[mockDate1, 10000]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("actives", [[mockDate1, 100]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("trials", [[mockDate1, 50]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("customers_new", [[mockDate1, 10]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("customers_active", [[mockDate1, 200]])),
+          })
+          // Chart options for customers_new
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({
+              object: "chart_options",
+              resolutions: [{ id: "0", display_name: "day" }],
+              segments: [{ id: "country", display_name: "Country" }],
+              filters: [],
+            }),
+          })
+          // v3 country data with non-standard names that need manual overrides
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({
+              object: "chart_data",
+              category: "customers_new",
+              display_type: "line",
+              display_name: "New Customers",
+              description: "New customers",
+              resolution: "day",
+              segments: [
+                { display_name: "Korea, Republic of", is_total: false },
+                { display_name: "Viet Nam", is_total: false },
+                { display_name: "Czechia", is_total: false },
+              ],
+              values: [
+                { cohort: mockDate1, segment: 0, value: 10 },
+                { cohort: mockDate1, segment: 1, value: 5 },
+                { cohort: mockDate1, segment: 2, value: 3 },
+              ],
+              start_date: mockDate1,
+              end_date: mockDate1,
+            }),
+          });
+
+        const sinceDate = new Date("2025-01-10T00:00:00Z");
+        const result = await revenuecatFetcher.sync(mockAccount, sinceDate);
+
+        const countryMetrics = result.metrics.filter(
+          (m) => m.metricType === "new_customers_by_country"
+        );
+
+        expect(countryMetrics).toHaveLength(3);
+
+        // "Korea, Republic of" → "KR"
+        expect(countryMetrics.find((m) => m.metadata?.country === "KR")?.value).toBe(10);
+
+        // "Viet Nam" → "VN"
+        expect(countryMetrics.find((m) => m.metadata?.country === "VN")?.value).toBe(5);
+
+        // "Czechia" → "CZ"
+        expect(countryMetrics.find((m) => m.metadata?.country === "CZ")?.value).toBe(3);
+      });
+
+      it("handles v3 timestamps in seconds", async () => {
+        // v3 format can use timestamps in seconds (< 1 trillion)
+        const mockDate1Sec = Math.floor(new Date("2025-01-10T00:00:00Z").getTime() / 1000);
+        const mockDate1Ms = new Date("2025-01-10T00:00:00Z").getTime();
+
+        mockFetch
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createOptionsNoSegment()),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("mrr", [[mockDate1Ms, 5000]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("revenue", [[mockDate1Ms, 10000]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("actives", [[mockDate1Ms, 100]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("trials", [[mockDate1Ms, 50]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("customers_new", [[mockDate1Ms, 10]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve(createMockChartData("customers_active", [[mockDate1Ms, 200]])),
+          })
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({
+              object: "chart_options",
+              resolutions: [{ id: "0", display_name: "day" }],
+              segments: [{ id: "country", display_name: "Country" }],
+              filters: [],
+            }),
+          })
+          // v3 data with timestamp in seconds
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({
+              object: "chart_data",
+              category: "customers_new",
+              display_type: "line",
+              display_name: "New Customers",
+              description: "New customers",
+              resolution: "day",
+              segments: [
+                { display_name: "United Kingdom", is_total: false },
+              ],
+              values: [
+                { cohort: mockDate1Sec, segment: 0, value: 8 },
+              ],
+              start_date: mockDate1Sec,
+              end_date: mockDate1Sec,
+            }),
+          });
+
+        const sinceDate = new Date("2025-01-10T00:00:00Z");
+        const result = await revenuecatFetcher.sync(mockAccount, sinceDate);
+
+        const countryMetrics = result.metrics.filter(
+          (m) => m.metricType === "new_customers_by_country"
+        );
+
+        expect(countryMetrics).toHaveLength(1);
+        // Intl.DisplayNames maps "United Kingdom" → "GB" on most runtimes,
+        // but some Node versions return "UK". Either is acceptable.
+        expect(["GB", "UK"]).toContain(countryMetrics[0].metadata?.country);
+        expect(countryMetrics[0].date).toBe("2025-01-10");
+        expect(countryMetrics[0].value).toBe(8);
+      });
+    });
   });
 });

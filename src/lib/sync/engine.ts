@@ -313,11 +313,15 @@ function ensureProjects(
 
 /**
  * Store normalized metrics in the database.
- * Uses upsert logic — for the same account + metric_type + date + project,
- * the most recent value wins.
+ * Uses upsert logic — for the same account + metric_type + date + project +
+ * metadata, the most recent value wins.
  *
  * When a metric has a projectId, the dedup key includes it so that
  * per-product metrics don't collide with each other or with account-level totals.
+ *
+ * Metadata is included in the dedup key so that metrics sub-keyed by metadata
+ * (e.g. `new_customers_by_country` with `{ country: "US" }` vs `{ country: "DE" }`)
+ * are stored as separate rows rather than overwriting each other.
  *
  * Performance: Uses prepared statements and a project cache to minimize
  * database round-trips. The dedup SELECT uses the idx_metrics_dedup index.
@@ -336,7 +340,9 @@ function storeMetrics(
     const resolvedProjectId = metric.projectId || null;
     const metadataJson = JSON.stringify(metric.metadata || {});
 
-    // Build dedup conditions — projectId is part of the key
+    // Build dedup conditions — projectId and metadata are part of the key.
+    // Including metadata ensures metrics sub-keyed by metadata fields
+    // (e.g. country) don't overwrite each other.
     const conditions = [
       eq(metrics.accountId, accountId),
       eq(metrics.metricType, metric.metricType),
@@ -347,6 +353,7 @@ function storeMetrics(
     } else {
       conditions.push(isNull(metrics.projectId));
     }
+    conditions.push(eq(metrics.metadata, metadataJson));
 
     const existing = db
       .select({ id: metrics.id })

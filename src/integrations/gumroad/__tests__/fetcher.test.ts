@@ -199,6 +199,26 @@ function createMockSale(overrides: {
   };
 }
 
+function createMockSaleWithCountry(overrides: {
+  price: number;
+  created_at: string;
+  product_id: string;
+  product_name: string;
+  refunded?: boolean;
+  chargedback?: boolean;
+  subscription_duration?: string;
+  email?: string;
+  recurring_charge?: boolean;
+  country_iso2?: string;
+  country?: string;
+}) {
+  return {
+    ...createMockSale(overrides),
+    country: overrides.country ?? null,
+    country_iso2: overrides.country_iso2 ?? null,
+  };
+}
+
 function createMockProduct(overrides: {
   id: string;
   name: string;
@@ -1014,6 +1034,329 @@ describe("Gumroad Fetcher", () => {
 
       // 6 sales + 3 products + 5 subscribers = 14
       expect(result.recordsProcessed).toBe(14);
+    });
+
+    // ── Country metrics ─────────────────────────────────────────────────
+
+    describe("new_customers_by_country", () => {
+      it("should emit per-country per-product metrics from sales with country_iso2", async () => {
+        const salesWithCountry = [
+          createMockSaleWithCountry({
+            price: 2999,
+            created_at: "2026-02-01T10:00:00Z",
+            product_id: "prod_sub",
+            product_name: "Premium Membership",
+            subscription_duration: "monthly",
+            email: "alice@example.com",
+            country_iso2: "us",
+          }),
+          createMockSaleWithCountry({
+            price: 4999,
+            created_at: "2026-02-01T14:00:00Z",
+            product_id: "prod_ebook",
+            product_name: "UI Design eBook",
+            email: "bob@example.com",
+            country_iso2: "US",
+          }),
+          createMockSaleWithCountry({
+            price: 4999,
+            created_at: "2026-02-01T15:00:00Z",
+            product_id: "prod_ebook",
+            product_name: "UI Design eBook",
+            email: "carol@example.com",
+            country_iso2: "de",
+          }),
+          createMockSaleWithCountry({
+            price: 4999,
+            created_at: "2026-02-02T09:00:00Z",
+            product_id: "prod_ebook",
+            product_name: "UI Design eBook",
+            email: "dave@example.com",
+            country_iso2: "US",
+          }),
+        ];
+
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async (url: string | URL | Request) => {
+            const urlStr = url.toString();
+            if (urlStr.includes("/v2/sales") && !urlStr.match(/\/v2\/sales\/[^/?]/)) {
+              return new Response(
+                JSON.stringify({ success: true, sales: salesWithCountry }),
+                { status: 200, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            if (urlStr.includes("/v2/products/") && urlStr.includes("/subscribers")) {
+              return new Response(
+                JSON.stringify({ success: true, subscribers: [] }),
+                { status: 200, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            if (urlStr.includes("/v2/products")) {
+              return new Response(
+                JSON.stringify({ success: true, products: mockProducts }),
+                { status: 200, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            return new Response("Not found", { status: 404 });
+          })
+        );
+
+        const result = await gumroadFetcher.sync(mockAccount, new Date("2026-01-01"));
+
+        const countryMetrics = result.metrics.filter(
+          (m) => m.metricType === "new_customers_by_country"
+        );
+
+        // Feb 1: US/prod_sub (alice), US/prod_ebook (bob), DE/prod_ebook (carol)
+        // Feb 2: US/prod_ebook (dave)
+        expect(countryMetrics).toHaveLength(4);
+
+        // Check that country_iso2 is uppercased
+        const usSub = countryMetrics.find(
+          (m) => m.metadata?.country === "US" && m.projectId === "prod_sub"
+        );
+        expect(usSub?.value).toBe(1);
+        expect(usSub?.date).toBe("2026-02-01");
+        expect(usSub?.metadata?.product_name).toBe("Premium Membership");
+
+        // US/ebook on Feb 1
+        const usEbookFeb1 = countryMetrics.find(
+          (m) =>
+            m.metadata?.country === "US" &&
+            m.projectId === "prod_ebook" &&
+            m.date === "2026-02-01"
+        );
+        expect(usEbookFeb1?.value).toBe(1);
+
+        // DE/ebook on Feb 1
+        const deEbook = countryMetrics.find(
+          (m) => m.metadata?.country === "DE" && m.projectId === "prod_ebook"
+        );
+        expect(deEbook?.value).toBe(1);
+        expect(deEbook?.date).toBe("2026-02-01");
+
+        // US/ebook on Feb 2
+        const usEbookFeb2 = countryMetrics.find(
+          (m) =>
+            m.metadata?.country === "US" &&
+            m.projectId === "prod_ebook" &&
+            m.date === "2026-02-02"
+        );
+        expect(usEbookFeb2?.value).toBe(1);
+      });
+
+      it("should deduplicate by email per day/country/product", async () => {
+        const salesDuplicateEmail = [
+          createMockSaleWithCountry({
+            price: 2999,
+            created_at: "2026-02-01T10:00:00Z",
+            product_id: "prod_ebook",
+            product_name: "UI Design eBook",
+            email: "alice@example.com",
+            country_iso2: "US",
+          }),
+          createMockSaleWithCountry({
+            price: 1999,
+            created_at: "2026-02-01T14:00:00Z",
+            product_id: "prod_ebook",
+            product_name: "UI Design eBook",
+            email: "alice@example.com", // same email, same day, same product, same country
+            country_iso2: "US",
+          }),
+        ];
+
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async (url: string | URL | Request) => {
+            const urlStr = url.toString();
+            if (urlStr.includes("/v2/sales") && !urlStr.match(/\/v2\/sales\/[^/?]/)) {
+              return new Response(
+                JSON.stringify({ success: true, sales: salesDuplicateEmail }),
+                { status: 200, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            if (urlStr.includes("/v2/products/") && urlStr.includes("/subscribers")) {
+              return new Response(
+                JSON.stringify({ success: true, subscribers: [] }),
+                { status: 200, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            if (urlStr.includes("/v2/products")) {
+              return new Response(
+                JSON.stringify({ success: true, products: mockProducts }),
+                { status: 200, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            return new Response("Not found", { status: 404 });
+          })
+        );
+
+        const result = await gumroadFetcher.sync(mockAccount, new Date("2026-01-01"));
+
+        const countryMetrics = result.metrics.filter(
+          (m) => m.metricType === "new_customers_by_country"
+        );
+
+        // Same email on same day/country/product → counted once
+        expect(countryMetrics).toHaveLength(1);
+        expect(countryMetrics[0].value).toBe(1);
+      });
+
+      it("should default to 'Unknown' when country_iso2 is missing", async () => {
+        const salesNoCountry = [
+          createMockSaleWithCountry({
+            price: 2999,
+            created_at: "2026-02-01T10:00:00Z",
+            product_id: "prod_ebook",
+            product_name: "UI Design eBook",
+            email: "alice@example.com",
+            // no country_iso2
+          }),
+        ];
+
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async (url: string | URL | Request) => {
+            const urlStr = url.toString();
+            if (urlStr.includes("/v2/sales") && !urlStr.match(/\/v2\/sales\/[^/?]/)) {
+              return new Response(
+                JSON.stringify({ success: true, sales: salesNoCountry }),
+                { status: 200, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            if (urlStr.includes("/v2/products/") && urlStr.includes("/subscribers")) {
+              return new Response(
+                JSON.stringify({ success: true, subscribers: [] }),
+                { status: 200, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            if (urlStr.includes("/v2/products")) {
+              return new Response(
+                JSON.stringify({ success: true, products: mockProducts }),
+                { status: 200, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            return new Response("Not found", { status: 404 });
+          })
+        );
+
+        const result = await gumroadFetcher.sync(mockAccount, new Date("2026-01-01"));
+
+        const countryMetrics = result.metrics.filter(
+          (m) => m.metricType === "new_customers_by_country"
+        );
+
+        expect(countryMetrics).toHaveLength(1);
+        expect(countryMetrics[0].metadata?.country).toBe("Unknown");
+      });
+
+      it("should exclude recurring charges from country metrics", async () => {
+        const salesWithRecurring = [
+          createMockSaleWithCountry({
+            price: 2999,
+            created_at: "2026-02-01T10:00:00Z",
+            product_id: "prod_sub",
+            product_name: "Premium Membership",
+            subscription_duration: "monthly",
+            email: "alice@example.com",
+            country_iso2: "US",
+            recurring_charge: true, // renewal, not new customer
+          }),
+        ];
+
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async (url: string | URL | Request) => {
+            const urlStr = url.toString();
+            if (urlStr.includes("/v2/sales") && !urlStr.match(/\/v2\/sales\/[^/?]/)) {
+              return new Response(
+                JSON.stringify({ success: true, sales: salesWithRecurring }),
+                { status: 200, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            if (urlStr.includes("/v2/products/") && urlStr.includes("/subscribers")) {
+              return new Response(
+                JSON.stringify({ success: true, subscribers: [] }),
+                { status: 200, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            if (urlStr.includes("/v2/products")) {
+              return new Response(
+                JSON.stringify({ success: true, products: mockProducts }),
+                { status: 200, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            return new Response("Not found", { status: 404 });
+          })
+        );
+
+        const result = await gumroadFetcher.sync(mockAccount, new Date("2026-01-01"));
+
+        const countryMetrics = result.metrics.filter(
+          (m) => m.metricType === "new_customers_by_country"
+        );
+
+        // Recurring charges are excluded from new customer counts
+        expect(countryMetrics).toHaveLength(0);
+      });
+
+      it("should exclude refunded and chargedback sales from country metrics", async () => {
+        const salesRefunded = [
+          createMockSaleWithCountry({
+            price: 2999,
+            created_at: "2026-02-01T10:00:00Z",
+            product_id: "prod_ebook",
+            product_name: "UI Design eBook",
+            email: "alice@example.com",
+            country_iso2: "US",
+            refunded: true,
+          }),
+          createMockSaleWithCountry({
+            price: 2999,
+            created_at: "2026-02-01T11:00:00Z",
+            product_id: "prod_ebook",
+            product_name: "UI Design eBook",
+            email: "bob@example.com",
+            country_iso2: "DE",
+            chargedback: true,
+          }),
+        ];
+
+        vi.stubGlobal(
+          "fetch",
+          vi.fn(async (url: string | URL | Request) => {
+            const urlStr = url.toString();
+            if (urlStr.includes("/v2/sales") && !urlStr.match(/\/v2\/sales\/[^/?]/)) {
+              return new Response(
+                JSON.stringify({ success: true, sales: salesRefunded }),
+                { status: 200, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            if (urlStr.includes("/v2/products/") && urlStr.includes("/subscribers")) {
+              return new Response(
+                JSON.stringify({ success: true, subscribers: [] }),
+                { status: 200, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            if (urlStr.includes("/v2/products")) {
+              return new Response(
+                JSON.stringify({ success: true, products: mockProducts }),
+                { status: 200, headers: { "Content-Type": "application/json" } }
+              );
+            }
+            return new Response("Not found", { status: 404 });
+          })
+        );
+
+        const result = await gumroadFetcher.sync(mockAccount, new Date("2026-01-01"));
+
+        const countryMetrics = result.metrics.filter(
+          (m) => m.metricType === "new_customers_by_country"
+        );
+
+        expect(countryMetrics).toHaveLength(0);
+      });
     });
   });
 

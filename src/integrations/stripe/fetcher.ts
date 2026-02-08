@@ -260,23 +260,97 @@ function computeMRR(
 }
 
 /**
- * Compute daily new customer counts.
+ * Compute daily new customer counts, including per-country breakdown.
+ *
+ * Country resolution uses a multi-signal approach (in priority order):
+ * 1. Card country from the customer's charges (most reliable — derived from
+ *    the card's issuing bank, present on ~100% of card-paying customers)
+ * 2. `customer.address.country` (only populated when billing address is collected)
+ * 3. Falls back to "Unknown" when neither is available
+ *
+ * @param customers - New customers from the Stripe API
+ * @param charges - Charges already fetched for revenue computation; used to
+ *   build a customerId → card country lookup without extra API calls.
+ *
+ * Emits two kinds of metrics:
+ * 1. Account-level `new_customers` per day (total count, no country metadata)
+ * 2. Per-country `new_customers` per day (with `metadata.country` set to the
+ *    ISO 3166-1 alpha-2 code)
  */
 function computeNewCustomers(
   customers: Stripe.Customer[],
+  charges: Stripe.Charge[],
 ): NormalizedMetric[] {
+  // Build a customer → card country lookup from charges.
+  // A customer may have multiple charges with different cards; use the most
+  // recent charge's card country (last one wins since charges are ordered by date).
+  const customerCardCountry = new Map<string, string>();
+  for (const charge of charges) {
+    if (charge.status !== "succeeded") continue;
+    const customerId =
+      typeof charge.customer === "string"
+        ? charge.customer
+        : charge.customer?.id;
+    if (!customerId) continue;
+
+    const cardCountry = charge.payment_method_details?.card?.country;
+    if (cardCountry) {
+      customerCardCountry.set(customerId, cardCountry.toUpperCase());
+    }
+  }
+
   const dailyMap = new Map<string, number>();
+  // day -> country -> count
+  const dailyCountryMap = new Map<string, Map<string, number>>();
 
   for (const customer of customers) {
     const date = format(new Date(customer.created * 1000), "yyyy-MM-dd");
     dailyMap.set(date, (dailyMap.get(date) || 0) + 1);
+
+    // Resolve country: card country (from charges) > address country > "Unknown"
+    const country =
+      customerCardCountry.get(customer.id) ||
+      customer.address?.country ||
+      "Unknown";
+
+    if (!dailyCountryMap.has(date)) dailyCountryMap.set(date, new Map());
+    const countryMap = dailyCountryMap.get(date)!;
+    countryMap.set(country, (countryMap.get(country) || 0) + 1);
   }
 
-  return Array.from(dailyMap).map(([date, count]) => ({
-    metricType: "new_customers",
-    value: count,
-    date,
-  }));
+  const metrics: NormalizedMetric[] = [];
+
+  // Account-level totals (no country metadata — backwards compatible)
+  for (const [date, count] of dailyMap) {
+    metrics.push({
+      metricType: "new_customers",
+      value: count,
+      date,
+    });
+  }
+
+  // Per-country breakdown — Stripe customers are inherently paying (derived
+  // from charges), so we emit both the general and paying-specific metrics.
+  for (const [date, countryMap] of dailyCountryMap) {
+    for (const [country, count] of countryMap) {
+      metrics.push(
+        {
+          metricType: "new_customers_by_country",
+          value: count,
+          date,
+          metadata: { country },
+        },
+        {
+          metricType: "paying_customers_by_country",
+          value: count,
+          date,
+          metadata: { country },
+        },
+      );
+    }
+  }
+
+  return metrics;
 }
 
 /**
@@ -362,7 +436,7 @@ export const stripeFetcher: DataFetcher = {
     t0 = Date.now();
     try {
       const customers = await fetchNewCustomers(stripe, syncSince);
-      const customerMetrics = computeNewCustomers(customers);
+      const customerMetrics = computeNewCustomers(customers, charges);
       allMetrics.push(...customerMetrics);
       totalRecords += customers.length;
       const step: SyncStep = {

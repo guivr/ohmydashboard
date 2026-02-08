@@ -3,13 +3,15 @@ import type { AccountConfig } from "../../types";
 
 // We need to mock Stripe before importing the fetcher
 const mockCharges = [
-  createMockCharge({ amount: 2999, created: dateToUnix("2026-02-01"), invoice: "in_sub1" }),
-  createMockCharge({ amount: 4999, created: dateToUnix("2026-02-01"), invoice: null }),
-  createMockCharge({ amount: 2999, created: dateToUnix("2026-02-02"), invoice: "in_sub2" }),
+  createMockCharge({ amount: 2999, created: dateToUnix("2026-02-01"), invoice: "in_sub1", customerId: "cus_alice", cardCountry: "US" }),
+  createMockCharge({ amount: 4999, created: dateToUnix("2026-02-01"), invoice: null, customerId: "cus_bob", cardCountry: "DE" }),
+  createMockCharge({ amount: 2999, created: dateToUnix("2026-02-02"), invoice: "in_sub2", customerId: "cus_carol", cardCountry: "US" }),
   createMockCharge({
     amount: 1000,
     created: dateToUnix("2026-02-03"),
     status: "failed",
+    customerId: "cus_dave",
+    cardCountry: "BR",
   }),
 ];
 
@@ -19,9 +21,9 @@ const mockSubscriptions = [
 ];
 
 const mockCustomers = [
-  createMockCustomer({ created: dateToUnix("2026-02-01") }),
-  createMockCustomer({ created: dateToUnix("2026-02-01") }),
-  createMockCustomer({ created: dateToUnix("2026-02-02") }),
+  createMockCustomer({ created: dateToUnix("2026-02-01"), id: "cus_alice" }),
+  createMockCustomer({ created: dateToUnix("2026-02-01"), id: "cus_bob" }),
+  createMockCustomer({ created: dateToUnix("2026-02-02"), id: "cus_carol" }),
 ];
 
 vi.mock("stripe", () => {
@@ -55,6 +57,8 @@ function createMockCharge(overrides: {
   status?: string;
   currency?: string;
   invoice?: string | null;
+  customerId?: string;
+  cardCountry?: string;
 }) {
   return {
     id: `ch_${Math.random().toString(36).slice(2)}`,
@@ -64,6 +68,10 @@ function createMockCharge(overrides: {
     currency: overrides.currency || "usd",
     status: overrides.status || "succeeded",
     invoice: overrides.invoice ?? null,
+    customer: overrides.customerId ?? null,
+    payment_method_details: overrides.cardCountry
+      ? { card: { country: overrides.cardCountry } }
+      : null,
   };
 }
 
@@ -91,11 +99,16 @@ function createMockSubscription(overrides: {
   };
 }
 
-function createMockCustomer(overrides: { created: number }) {
+function createMockCustomer(overrides: {
+  created: number;
+  id?: string;
+  address?: { country: string } | null;
+}) {
   return {
-    id: `cus_${Math.random().toString(36).slice(2)}`,
+    id: overrides.id ?? `cus_${Math.random().toString(36).slice(2)}`,
     created: overrides.created,
     deleted: undefined,
+    address: overrides.address ?? null,
   };
 }
 
@@ -288,6 +301,41 @@ describe("Stripe Fetcher", () => {
       // Feb 2: no one-time charges, so one_time_revenue is 0
       const otFeb2 = oneTimeRevenue.find((m) => m.date === "2026-02-02");
       expect(otFeb2?.value).toBe(0);
+    });
+
+    it("should emit new_customers_by_country from card country on charges", async () => {
+      const result = await stripeFetcher.sync(
+        mockAccount,
+        new Date("2026-01-01")
+      );
+
+      const countryMetrics = result.metrics.filter(
+        (m) => m.metricType === "new_customers_by_country"
+      );
+
+      // cus_alice (Feb 1) → card country US (from charge)
+      // cus_bob (Feb 1) → card country DE (from charge)
+      // cus_carol (Feb 2) → card country US (from charge)
+      // cus_dave's charge failed, not in customers list
+
+      // Feb 1: US=1 (alice), DE=1 (bob)
+      // Feb 2: US=1 (carol)
+      expect(countryMetrics).toHaveLength(3);
+
+      const usFeb1 = countryMetrics.find(
+        (m) => m.metadata?.country === "US" && m.date === "2026-02-01"
+      );
+      expect(usFeb1?.value).toBe(1);
+
+      const deFeb1 = countryMetrics.find(
+        (m) => m.metadata?.country === "DE" && m.date === "2026-02-01"
+      );
+      expect(deFeb1?.value).toBe(1);
+
+      const usFeb2 = countryMetrics.find(
+        (m) => m.metadata?.country === "US" && m.date === "2026-02-02"
+      );
+      expect(usFeb2?.value).toBe(1);
     });
 
     it("should produce sales_count matching charges_count", async () => {
