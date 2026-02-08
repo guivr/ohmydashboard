@@ -38,12 +38,14 @@ const pkg = JSON.parse(readFileSync(resolve(cliDir, "package.json"), "utf8"));
 const version = pkg.version;
 console.log(`\nReleasing ohmydashboard v${version}\n`);
 
-// 3. Publish to npm (prepublishOnly will build automatically)
-run(`pnpm --filter ohmydashboard publish --access public`);
-
-// 4. Commit and tag
+// 3. Commit the version bump first (pnpm requires a clean working tree)
 run(`git add packages/cli/package.json`);
 run(`git commit -m "release cli v${version}"`);
+
+// 4. Publish to npm (prepublishOnly will build automatically)
+run(`pnpm --filter ohmydashboard publish --access public --no-git-checks`);
+
+// 5. Tag the release
 run(`git tag v${version}`);
 
 console.log(`\nDone! Published ohmydashboard@${version} to npm.`);
