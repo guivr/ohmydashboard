@@ -347,6 +347,8 @@ export function CustomersByCountryChart({
 
   const hasData = chartData.length > 0 || unknownCount > 0;
   const hasSources = sourcesByCountry.size > 0;
+  const showSkeleton = loading && !hasData;
+  const showLoadingOverlay = loading && hasData;
 
   return (
     <div ref={cardRef}>
@@ -384,7 +386,7 @@ export function CustomersByCountryChart({
           <Globe className="h-4 w-4 text-muted-foreground" />
         </CardHeader>
         <CardContent>
-          {loading ? (
+          {showSkeleton ? (
             <div className="space-y-3">
               <Skeleton className="h-7 w-28" />
               <Skeleton className="h-[300px] w-full" />
@@ -400,7 +402,10 @@ export function CustomersByCountryChart({
               Country data is only available for customers with a payment method on file.
             </div>
           ) : (
-            <>
+            <div className="relative">
+              {showLoadingOverlay && (
+                <div className="pointer-events-none absolute inset-0 z-10 rounded-md bg-background/60 backdrop-blur-[1px]" />
+              )}
               {/* Summary */}
               <div className="mb-4 flex items-baseline gap-2">
                 <span className="text-2xl font-bold">
@@ -790,7 +795,7 @@ export function CustomersByCountryChart({
                   </span>
                 </div>
               )}
-            </>
+            </div>
           )}
         </CardContent>
       </Card>
