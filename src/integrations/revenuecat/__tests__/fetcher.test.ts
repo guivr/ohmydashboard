@@ -191,8 +191,19 @@ describe("RevenueCat Fetcher", () => {
                 [mockDate3, 8],
               ])
             ),
+        })
+        // Mock 7: customers_active
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve(
+              createMockChartData("customers_active", [
+                [mockDate1, 200],
+                [mockDate2, 205],
+                [mockDate3, 210],
+              ])
+            ),
         });
-      // customers_active is in REALTIME_ONLY_CHARTS — skipped (no mock needed)
       // No segmented revenue fetch since options had no matching segment
 
       const sinceDate = new Date("2025-01-10T00:00:00Z");
@@ -200,12 +211,15 @@ describe("RevenueCat Fetcher", () => {
 
       expect(result.success).toBe(true);
 
-      // Check MRR metrics
+      // Check MRR metrics (3 from chart + 1 carry-forward to today)
       const mrrMetrics = result.metrics.filter((m) => m.metricType === "mrr");
-      expect(mrrMetrics).toHaveLength(3);
+      expect(mrrMetrics).toHaveLength(4);
       expect(mrrMetrics[0].value).toBe(5000);
       expect(mrrMetrics[0].currency).toBe("USD");
       expect(mrrMetrics[0].date).toBe("2025-01-10");
+      // Carry-forward: latest value (Jan 12) duplicated to today (Jan 15)
+      const mrrToday = mrrMetrics.find((m) => m.date === "2025-01-15");
+      expect(mrrToday?.value).toBe(5300);
 
       // Revenue zero-fills from Jan 10 to Jan 15 = 6 days (3 actual + 3 zero-filled)
       const revenueMetrics = result.metrics.filter((m) => m.metricType === "revenue");
@@ -219,14 +233,14 @@ describe("RevenueCat Fetcher", () => {
       const otRevMetrics = result.metrics.filter((m) => m.metricType === "one_time_revenue");
       expect(otRevMetrics).toHaveLength(0);
 
-      // Check active subscriptions
+      // Check active subscriptions (3 from chart + 1 carry-forward to today)
       const subsMetrics = result.metrics.filter((m) => m.metricType === "active_subscriptions");
-      expect(subsMetrics).toHaveLength(3);
+      expect(subsMetrics).toHaveLength(4);
       expect(subsMetrics[0].value).toBe(100);
 
-      // Check active trials
+      // Check active trials (3 from chart + 1 carry-forward to today)
       const trialsMetrics = result.metrics.filter((m) => m.metricType === "active_trials");
-      expect(trialsMetrics).toHaveLength(3);
+      expect(trialsMetrics).toHaveLength(4);
       expect(trialsMetrics[0].value).toBe(50);
     });
 
@@ -295,7 +309,18 @@ describe("RevenueCat Fetcher", () => {
               ])
             ),
         })
-        // Mock 7: segmented revenue fetch (with segment=product_duration_type)
+        // Mock 7: customers_active
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve(
+              createMockChartData("customers_active", [
+                [mockDate1, 200],
+                [mockDate2, 205],
+              ])
+            ),
+        })
+        // Mock 8: segmented revenue fetch (with segment=product_duration_type)
         .mockResolvedValueOnce({
           ok: true,
           json: () =>
@@ -388,14 +413,18 @@ describe("RevenueCat Fetcher", () => {
         .mockResolvedValueOnce({
           ok: true,
           json: () => Promise.resolve(createMockChartData("customers_new", [[mockDate, 10]])),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(createMockChartData("customers_active", [[mockDate, 200]])),
         });
 
       const sinceDate = new Date("2025-01-10T00:00:00Z");
       const result = await revenuecatFetcher.sync(mockAccount, sinceDate);
 
       expect(result.success).toBe(true);
-      // Should have 2 mrr metrics (null value skipped)
-      expect(result.metrics.filter((m) => m.metricType === "mrr")).toHaveLength(2);
+      // Should have 2 mrr metrics (null value skipped) + 1 carry-forward to today
+      expect(result.metrics.filter((m) => m.metricType === "mrr")).toHaveLength(3);
     });
 
     it("continues with other charts if one fails", async () => {
@@ -425,6 +454,10 @@ describe("RevenueCat Fetcher", () => {
         .mockResolvedValueOnce({
           ok: true,
           json: () => Promise.resolve(createMockChartData("customers_new", [[mockDate, 10]])),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(createMockChartData("customers_active", [[mockDate, 200]])),
         });
 
       const sinceDate = new Date("2025-01-10T00:00:00Z");
@@ -437,9 +470,10 @@ describe("RevenueCat Fetcher", () => {
       // No subscription_revenue or one_time_revenue (no segment available)
       expect(result.metrics.filter((m) => m.metricType === "subscription_revenue")).toHaveLength(0);
       expect(result.metrics.filter((m) => m.metricType === "one_time_revenue")).toHaveLength(0);
-      // Other charts: actives + trials + customers_new = 3
+      // Other charts: actives (1) + trials (1) + customers_new (1) + customers_active (1) = 4
+      // Plus carry-forward for stock metrics: actives (+1) + trials (+1) + active_users (+1) = 7
       const otherCount = result.metrics.filter((m) => m.metricType !== "revenue").length;
-      expect(otherCount).toBe(3);
+      expect(otherCount).toBe(7);
       expect(result.steps?.some((s) => s.status === "error")).toBe(true);
     });
 
@@ -447,7 +481,8 @@ describe("RevenueCat Fetcher", () => {
       // Mock 1: chart options (fails too — discoverRevenueSegment catches and returns null)
       mockFetch
         .mockRejectedValueOnce(new Error("Options fetch failed"))
-        // Mock 2-6: all 5 chart fetches fail (customers_active skipped)
+        // Mock 2-7: all 6 chart fetches fail
+        .mockRejectedValueOnce(new Error("All fetches failed"))
         .mockRejectedValueOnce(new Error("All fetches failed"))
         .mockRejectedValueOnce(new Error("All fetches failed"))
         .mockRejectedValueOnce(new Error("All fetches failed"))
@@ -540,7 +575,15 @@ describe("RevenueCat Fetcher", () => {
               createMockChartData("customers_new", [[mockDate1, 10]])
             ),
         })
-        // Mock 7: segmented revenue fetch FAILS
+        // Mock 7: customers_active
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve(
+              createMockChartData("customers_active", [[mockDate1, 200]])
+            ),
+        })
+        // Mock 8: segmented revenue fetch FAILS
         .mockRejectedValueOnce(new Error("Segmented fetch failed"));
 
       const sinceDate = new Date("2025-01-10T00:00:00Z");

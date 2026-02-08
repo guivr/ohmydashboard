@@ -135,9 +135,7 @@ describe("MetricCard", () => {
     expect(card.className).not.toContain("cursor-pointer");
   });
 
-  it("should show overlay dropdown when clicking card with ranking", () => {
-    vi.useFakeTimers();
-
+  it("should show breakdown when clicking 'Show breakdown' button", () => {
     render(
       <MetricCard
         title="Total Revenue"
@@ -147,16 +145,12 @@ describe("MetricCard", () => {
       />
     );
 
-    // Dropdown not visible yet
-    expect(screen.queryByText("Source leaderboard")).not.toBeInTheDocument();
+    // Breakdown not visible yet
+    expect(screen.queryByText("Side Project")).not.toBeInTheDocument();
 
-    // Click the card to open dropdown
-    const card = screen.getByText("Total Revenue").closest("[class*='card']")!;
-    fireEvent.click(card);
-    act(() => { vi.advanceTimersByTime(100); });
-
-    // Dropdown overlay is visible
-    expect(screen.getByText("Source leaderboard")).toBeInTheDocument();
+    // Click the "Show breakdown" button to expand
+    const breakdownBtn = screen.getByText("Show breakdown");
+    fireEvent.click(breakdownBtn);
 
     // Rank badges: 1, 2, 3
     expect(screen.getByText("1")).toBeInTheDocument();
@@ -165,16 +159,12 @@ describe("MetricCard", () => {
 
     // Account names in leaderboard (My SaaS also in crown badge)
     const mySaasEls = screen.getAllByText("My SaaS");
-    expect(mySaasEls.length).toBe(2); // crown badge + dropdown
+    expect(mySaasEls.length).toBe(2); // crown badge + breakdown
     expect(screen.getByText("Side Project")).toBeInTheDocument();
     expect(screen.getByText("Consulting")).toBeInTheDocument();
-
-    vi.useRealTimers();
   });
 
   it("should show top 5 entries and allow expanding remaining rankings", () => {
-    vi.useFakeTimers();
-
     render(
       <MetricCard
         title="Total Revenue"
@@ -184,11 +174,12 @@ describe("MetricCard", () => {
       />
     );
 
-    const card = screen.getByText("Total Revenue").closest("[class*='card']")!;
-    fireEvent.click(card);
-    act(() => { vi.advanceTimersByTime(100); });
+    // Open the breakdown
+    fireEvent.click(screen.getByText("Show breakdown"));
 
-    expect(screen.getByText("Alpha")).toBeInTheDocument();
+    // Alpha appears twice: crown badge + breakdown
+    const alphaEls = screen.getAllByText("Alpha");
+    expect(alphaEls.length).toBe(2);
     expect(screen.getByText("Beta")).toBeInTheDocument();
     expect(screen.getByText("Gamma")).toBeInTheDocument();
     expect(screen.getByText("Delta")).toBeInTheDocument();
@@ -202,13 +193,9 @@ describe("MetricCard", () => {
     expect(screen.getByText("Zeta")).toBeInTheDocument();
     expect(screen.getByText("Eta")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Show less" })).toBeInTheDocument();
-
-    vi.useRealTimers();
   });
 
-  it("should close dropdown when clicking card again", () => {
-    vi.useFakeTimers();
-
+  it("should collapse breakdown when clicking button again", () => {
     render(
       <MetricCard
         title="Total Revenue"
@@ -218,24 +205,20 @@ describe("MetricCard", () => {
       />
     );
 
-    const card = screen.getByText("Total Revenue").closest("[class*='card']")!;
+    const breakdownBtn = screen.getByText("Show breakdown");
 
     // Open
-    fireEvent.click(card);
-    act(() => { vi.advanceTimersByTime(100); });
-    expect(screen.getByText("Source leaderboard")).toBeInTheDocument();
+    fireEvent.click(breakdownBtn);
+    expect(screen.getByText("Side Project")).toBeInTheDocument();
+    expect(screen.getByText("Hide breakdown")).toBeInTheDocument();
 
     // Close
-    fireEvent.click(card);
-    // Dropdown is removed from DOM
-    expect(screen.queryByText("Source leaderboard")).not.toBeInTheDocument();
-
-    vi.useRealTimers();
+    fireEvent.click(screen.getByText("Hide breakdown"));
+    // Breakdown entries are removed from DOM
+    expect(screen.queryByText("Side Project")).not.toBeInTheDocument();
   });
 
-  it("should format ranking values as currency in the dropdown", () => {
-    vi.useFakeTimers();
-
+  it("should format ranking values as currency in the breakdown", () => {
     render(
       <MetricCard
         title="Revenue"
@@ -245,20 +228,14 @@ describe("MetricCard", () => {
       />
     );
 
-    const card = screen.getByText("Revenue").closest("[class*='card']")!;
-    fireEvent.click(card);
-    act(() => { vi.advanceTimersByTime(100); });
+    fireEvent.click(screen.getByText("Show breakdown"));
 
     expect(screen.getByText("$800")).toBeInTheDocument();
     expect(screen.getByText("$500")).toBeInTheDocument();
     expect(screen.getByText("$200")).toBeInTheDocument();
-
-    vi.useRealTimers();
   });
 
   it("should format ranking values as numbers for number format", () => {
-    vi.useFakeTimers();
-
     const numberRanking: RankingEntry[] = [
       { label: "Account A", integrationName: "Stripe", value: 1200, percentage: 60 },
       { label: "Account B", integrationName: "Stripe", value: 800, percentage: 40 },
@@ -273,13 +250,9 @@ describe("MetricCard", () => {
       />
     );
 
-    const card = screen.getByText("Customers").closest("[class*='card']")!;
-    fireEvent.click(card);
-    act(() => { vi.advanceTimersByTime(100); });
+    fireEvent.click(screen.getByText("Show breakdown"));
 
     expect(screen.getByText("1,200")).toBeInTheDocument();
-
-    vi.useRealTimers();
   });
 
   it("should not be interactive without ranking", () => {
@@ -295,9 +268,7 @@ describe("MetricCard", () => {
     expect(card.className).not.toContain("cursor-pointer");
   });
 
-  it("should show percentage values in the dropdown", () => {
-    vi.useFakeTimers();
-
+  it("should show percentage values in the breakdown", () => {
     render(
       <MetricCard
         title="Revenue"
@@ -307,20 +278,14 @@ describe("MetricCard", () => {
       />
     );
 
-    const card = screen.getByText("Revenue").closest("[class*='card']")!;
-    fireEvent.click(card);
-    act(() => { vi.advanceTimersByTime(100); });
+    fireEvent.click(screen.getByText("Show breakdown"));
 
     expect(screen.getByText("53.3%")).toBeInTheDocument();
     expect(screen.getByText("33.3%")).toBeInTheDocument();
     expect(screen.getByText("13.3%")).toBeInTheDocument();
-
-    vi.useRealTimers();
   });
 
-  it("should show integration logos in the dropdown", () => {
-    vi.useFakeTimers();
-
+  it("should show integration logos in the breakdown", () => {
     render(
       <MetricCard
         title="Revenue"
@@ -330,21 +295,15 @@ describe("MetricCard", () => {
       />
     );
 
-    const card = screen.getByText("Revenue").closest("[class*='card']")!;
-    fireEvent.click(card);
-    act(() => { vi.advanceTimersByTime(100); });
+    fireEvent.click(screen.getByText("Show breakdown"));
 
     // Integration logos are rendered with aria-label
     const stripeLogos = screen.getAllByLabelText("Stripe logo");
     expect(stripeLogos.length).toBe(2); // two Stripe accounts
     expect(screen.getByLabelText("Gumroad logo")).toBeInTheDocument();
-
-    vi.useRealTimers();
   });
 
-  it("should use custom rankingLabel in dropdown header", () => {
-    vi.useFakeTimers();
-
+  it("should render breakdown with custom rankingLabel prop (accepted but not displayed as header)", () => {
     render(
       <MetricCard
         title="Revenue"
@@ -355,14 +314,14 @@ describe("MetricCard", () => {
       />
     );
 
-    const card = screen.getByText("Revenue").closest("[class*='card']")!;
-    fireEvent.click(card);
-    act(() => { vi.advanceTimersByTime(100); });
+    // rankingLabel prop is accepted without error; breakdown still functions
+    fireEvent.click(screen.getByText("Show breakdown"));
 
-    expect(screen.getByText("Product leaderboard")).toBeInTheDocument();
-    expect(screen.queryByText("Source leaderboard")).not.toBeInTheDocument();
-
-    vi.useRealTimers();
+    // All ranking entries are rendered correctly
+    const mySaasEls = screen.getAllByText("My SaaS");
+    expect(mySaasEls.length).toBe(2); // crown badge + breakdown
+    expect(screen.getByText("Side Project")).toBeInTheDocument();
+    expect(screen.getByText("Consulting")).toBeInTheDocument();
   });
 
   it("should show change indicator with description when previousValue is provided", () => {
@@ -377,7 +336,8 @@ describe("MetricCard", () => {
     );
 
     expect(screen.getByText("+50.0%")).toBeInTheDocument();
-    expect(screen.getByText("vs previous 30 days")).toBeInTheDocument();
+    // The description is rendered alongside the previous value in a single <p>
+    expect(screen.getByText(/vs previous 30 days/)).toBeInTheDocument();
   });
 
   // ─── Loading / skeleton tests ───────────────────────────────────────────────

@@ -19,7 +19,10 @@ interface RevenueCatChartData {
   display_name: string;
   description: string;
   resolution: "day" | "week" | "month" | "quarter" | "year";
-  values: Array<[number, ...(number | null)[]]> | Array<{ x: number; y: number | null }>;
+  values:
+    | Array<[number, ...(number | null)[]]>                     // v2 array format
+    | Array<{ x: number; y: number | null }>                    // v2 object format
+    | Array<{ cohort: number; value: number | null; measure?: number; incomplete?: boolean }>; // v3 realtime format
   start_date: number | null;
   end_date: number | null;
   yaxis_currency?: string;
@@ -53,7 +56,12 @@ const REVENUECAT_CHART_MAP: Record<string, string> = {
   customers_active: "active_users",
 };
 
-const REALTIME_ONLY_CHARTS = new Set(["customers_active"]);
+/**
+ * Stock (point-in-time) metric keys whose latest value should be carried
+ * forward to today when the chart response doesn't include a data point
+ * for the current day.
+ */
+const STOCK_METRIC_KEYS = new Set(["mrr", "active_subscriptions", "active_trials", "active_users"]);
 
 /**
  * Segment IDs we look for on the `revenue` chart to split subscription vs
@@ -76,6 +84,63 @@ const SUBSCRIPTION_SEGMENT_IDS = new Set([
   "auto_renewable",
   "auto_renewable_subscription",
 ]);
+
+/**
+ * Maximum number of retries for rate-limited (429) requests.
+ * RevenueCat Charts & Metrics domain allows 5 requests/minute.
+ */
+const MAX_RETRIES = 3;
+
+/**
+ * Minimum delay between API calls (ms) to stay under the 5 req/min rate limit.
+ * 60s / 5 = 12s between calls. We use 13s for safety margin.
+ */
+const MIN_REQUEST_INTERVAL_MS = 13_000;
+let lastRequestTime = 0;
+
+
+async function paceRequest(): Promise<void> {
+  // Skip pacing in test environments to avoid fake-timer issues
+  if (process.env.VITEST || process.env.NODE_ENV === "test") {
+    return;
+  }
+  const now = Date.now();
+  const elapsed = now - lastRequestTime;
+  if (lastRequestTime > 0 && elapsed < MIN_REQUEST_INTERVAL_MS) {
+    const delay = MIN_REQUEST_INTERVAL_MS - elapsed;
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  lastRequestTime = Date.now();
+}
+
+/**
+ * Make a RevenueCat API request with automatic retry on 429 rate limiting.
+ * Waits for the `backoff_ms` duration specified in the 429 response, or
+ * defaults to 15 seconds.
+ */
+async function fetchWithRetry(
+  url: string,
+  headers: Record<string, string>,
+  retries = MAX_RETRIES
+): Promise<Response> {
+  await paceRequest();
+  const response = await fetch(url, { method: "GET", headers });
+
+  if (response.status === 429 && retries > 0) {
+    let backoffMs = 15_000;
+    try {
+      const body = await response.json();
+      if (body?.backoff_ms && typeof body.backoff_ms === "number") {
+        backoffMs = body.backoff_ms;
+      }
+    } catch { /* use default backoff */ }
+
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    return fetchWithRetry(url, headers, retries - 1);
+  }
+
+  return response;
+}
 
 /**
  * Fetch chart data from RevenueCat API.
@@ -101,18 +166,19 @@ async function fetchChart(
 
   const startStr = format(startDate, "yyyy-MM-dd");
   const endStr = format(endDate, "yyyy-MM-dd");
-  let url = `${REVENUECAT_API_BASE}/projects/${project_id}/charts/${chartName}?start_date=${startStr}&end_date=${endStr}&realtime=false`;
+  // Resolution "0" = day in v3 (realtime) charts. See chart options endpoint
+  // for available resolution IDs; "0" is the most granular (daily).
+  let url = `${REVENUECAT_API_BASE}/projects/${project_id}/charts/${chartName}?start_date=${startStr}&end_date=${endStr}&resolution=0`;
   if (segment) {
     url += `&segment=${encodeURIComponent(segment)}`;
   }
 
-  const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${secret_api_key}`,
-      "Content-Type": "application/json",
-    },
-  });
+  const headers = {
+    Authorization: `Bearer ${secret_api_key}`,
+    "Content-Type": "application/json",
+  };
+
+  const response = await fetchWithRetry(url, headers);
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -138,15 +204,14 @@ async function fetchChartOptions(
     throw new Error("Missing required credentials: secret_api_key and project_id");
   }
 
-  const url = `${REVENUECAT_API_BASE}/projects/${project_id}/charts/${chartName}/options?realtime=false`;
+  const url = `${REVENUECAT_API_BASE}/projects/${project_id}/charts/${chartName}/options`;
 
-  const response = await fetch(url, {
-    method: "GET",
-    headers: {
-      Authorization: `Bearer ${secret_api_key}`,
-      "Content-Type": "application/json",
-    },
-  });
+  const headers = {
+    Authorization: `Bearer ${secret_api_key}`,
+    "Content-Type": "application/json",
+  };
+
+  const response = await fetchWithRetry(url, headers);
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -177,16 +242,45 @@ function normalizeChartData(
   for (const dataPoint of chartData.values) {
     let timestamp: number;
     let value: number | null;
+    let incomplete = false;
 
-    // Handle both array format [timestamp, value] and object format {x, y}
     if (Array.isArray(dataPoint)) {
+      // v2 array format: [timestamp, value]
       [timestamp, value] = dataPoint as [number, number | null];
+    } else if ("cohort" in dataPoint) {
+      // v3 realtime format: {cohort, value, measure?, incomplete?}
+      const v3 = dataPoint as {
+        cohort: number;
+        value: number | null;
+        measure?: number;
+        incomplete?: boolean;
+      };
+
+      // Only use the primary measure (index 0). v3 responses include
+      // multiple rows per timestamp — one per measure (e.g. Revenue + Transactions).
+      if (v3.measure !== undefined && v3.measure !== 0) {
+        continue;
+      }
+
+      timestamp = v3.cohort;
+      value = v3.value;
+      incomplete = v3.incomplete === true;
     } else {
-      timestamp = dataPoint.x;
-      value = dataPoint.y;
+      // v2 object format: {x, y}
+      const v2 = dataPoint as { x: number; y: number | null };
+      timestamp = v2.x;
+      value = v2.y;
     }
 
     if (value === null || value === undefined) {
+      continue;
+    }
+
+    // Skip incomplete zero values — RevenueCat marks data points as
+    // "incomplete" when realtime aggregation hasn't finished yet. A zero
+    // from an incomplete period means "not computed yet", not "$0 revenue".
+    // Storing it would overwrite the correct value from the previous sync.
+    if (incomplete && value === 0 && !STOCK_METRIC_KEYS.has(internalMetricKey)) {
       continue;
     }
 
@@ -194,6 +288,15 @@ function normalizeChartData(
     const normalizedTimestamp =
       timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp;
     const date = new Date(normalizedTimestamp);
+
+    // Discard data points with obviously invalid dates (before 2000-01-01 or
+    // beyond the requested end date + 1 day buffer). This guards against
+    // corrupt timestamps while allowing realtime data for today.
+    const bufferEnd = addDays(endDate, 1);
+    if (date.getFullYear() < 2000 || date > bufferEnd) {
+      continue;
+    }
+
     const normalizedMetric: NormalizedMetric = {
       metricType: internalMetricKey,
       value,
@@ -408,18 +511,6 @@ export const revenuecatFetcher: DataFetcher = {
 
     for (const [chartName, internalKey] of Object.entries(REVENUECAT_CHART_MAP)) {
       const t0 = Date.now();
-      if (REALTIME_ONLY_CHARTS.has(chartName)) {
-        const step: SyncStep = {
-          key: `fetch_chart_${chartName}`,
-          label: `Fetch RevenueCat chart: ${chartName}`,
-          status: "skipped",
-          durationMs: Date.now() - t0,
-          error: "Chart requires realtime data; skipped for non-realtime sync.",
-        };
-        steps.push(step);
-        reportStep?.(step);
-        continue;
-      }
       try {
         const chartData = await fetchChart(account.credentials, chartName, startDate, endDate);
         const metrics = normalizeChartData(chartData, internalKey, startDate, endDate);
@@ -449,6 +540,29 @@ export const revenuecatFetcher: DataFetcher = {
         steps.push(step);
         reportStep?.(step);
         // Continue with other charts even if one fails
+      }
+    }
+
+    // ── Step 2b: Carry forward stock metrics to today ──
+    // Even with realtime charts, today's data point may not yet be available
+    // (e.g. processing lag). For stock (point-in-time) metrics like MRR,
+    // the latest known value is still current, so we duplicate it with
+    // today's date when missing.
+    const today = format(new Date(), "yyyy-MM-dd");
+    for (const metricKey of STOCK_METRIC_KEYS) {
+      const metricsForKey = allMetrics.filter((m) => m.metricType === metricKey);
+      if (metricsForKey.length === 0) continue;
+
+      const hasToday = metricsForKey.some((m) => m.date === today);
+      if (!hasToday) {
+        // Find the most recent data point
+        const latest = metricsForKey.reduce((a, b) =>
+          a.date > b.date ? a : b
+        );
+        allMetrics.push({
+          ...latest,
+          date: today,
+        });
       }
     }
 
