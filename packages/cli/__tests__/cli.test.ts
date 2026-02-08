@@ -4,9 +4,15 @@ import { describe, it, expect, vi } from "vitest";
 import fs from "fs";
 import os from "os";
 import path from "path";
-import { runCli } from "../src/cli";
+import { buildTarballUrl, runCli } from "../src/cli";
 
 describe("ohmydashboard CLI", () => {
+  it("builds GitHub tarball URLs without refs/heads", () => {
+    expect(buildTarballUrl("gvrizzo", "ohmydashboard", "main")).toBe(
+      "https://codeload.github.com/gvrizzo/ohmydashboard/tar.gz/main"
+    );
+  });
+
   it("clones the default repo into the default folder and installs deps", async () => {
     const exec = vi.fn().mockResolvedValue(undefined);
     const downloadRepo = vi.fn().mockResolvedValue(undefined);

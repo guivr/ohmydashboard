@@ -102,7 +102,7 @@ function defaultExec(command: string, args: string[], options?: { cwd?: string }
   });
 }
 
-function parseGitHubRepo(repoUrl: string): { owner: string; repo: string } | null {
+export function parseGitHubRepo(repoUrl: string): { owner: string; repo: string } | null {
   const trimmed = repoUrl.trim();
   if (/^[^/]+\/[^/]+$/.test(trimmed)) {
     const [owner, repo] = trimmed.split("/");
@@ -122,6 +122,10 @@ function parseGitHubRepo(repoUrl: string): { owner: string; repo: string } | nul
   return null;
 }
 
+export function buildTarballUrl(owner: string, repo: string, branch: string) {
+  return `https://codeload.github.com/${owner}/${repo}/tar.gz/${branch}`;
+}
+
 async function defaultDownloadRepo(opts: {
   owner: string;
   repo: string;
@@ -133,7 +137,7 @@ async function defaultDownloadRepo(opts: {
 
   const tmpFile = await fs.promises.mkdtemp(path.join(os.tmpdir(), "ohmydashboard-"));
   const tarPath = path.join(tmpFile, `${repo}.tar.gz`);
-  const url = `https://codeload.github.com/${owner}/${repo}/tar.gz/refs/heads/${branch}`;
+  const url = buildTarballUrl(owner, repo, branch);
 
   await new Promise<void>((resolve, reject) => {
     https.get(url, (res) => {

@@ -21,4 +21,9 @@ export interface CliDeps {
     fs: typeof fs;
     path: typeof path;
 }
+export declare function parseGitHubRepo(repoUrl: string): {
+    owner: string;
+    repo: string;
+} | null;
+export declare function buildTarballUrl(owner: string, repo: string, branch: string): string;
 export declare function runCli(args: string[], deps: CliDeps): Promise<void>;

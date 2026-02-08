@@ -36,6 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.parseGitHubRepo = parseGitHubRepo;
+exports.buildTarballUrl = buildTarballUrl;
 exports.runCli = runCli;
 const fs = __importStar(require("fs"));
 const path = __importStar(require("path"));
@@ -123,12 +125,15 @@ function parseGitHubRepo(repoUrl) {
     }
     return null;
 }
+function buildTarballUrl(owner, repo, branch) {
+    return `https://codeload.github.com/${owner}/${repo}/tar.gz/${branch}`;
+}
 async function defaultDownloadRepo(opts) {
     const { owner, repo, branch, targetPath } = opts;
     await fs.promises.mkdir(targetPath, { recursive: true });
     const tmpFile = await fs.promises.mkdtemp(path.join(os_1.default.tmpdir(), "ohmydashboard-"));
     const tarPath = path.join(tmpFile, `${repo}.tar.gz`);
-    const url = `https://codeload.github.com/${owner}/${repo}/tar.gz/refs/heads/${branch}`;
+    const url = buildTarballUrl(owner, repo, branch);
     await new Promise((resolve, reject) => {
         https_1.default.get(url, (res) => {
             if (res.statusCode && res.statusCode >= 400) {
