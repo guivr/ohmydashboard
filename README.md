@@ -8,6 +8,8 @@ performance across all your businesses.
 
 OhMyDashboard is open source and runs locally. Your data stays on your machine.
 
+![OhMyDashboard preview](docs/screenshots/dashboard.jpg)
+
 ## Why this exists
 
 If you are an indie builder, you are constantly switching tabs:
