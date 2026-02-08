@@ -135,14 +135,41 @@ async function defaultDownloadRepo(opts) {
     const tarPath = path.join(tmpFile, `${repo}.tar.gz`);
     const url = buildTarballUrl(owner, repo, branch);
     await new Promise((resolve, reject) => {
-        https_1.default.get(url, (res) => {
-            if (res.statusCode && res.statusCode >= 400) {
-                reject(new Error(`Failed to download repo (HTTP ${res.statusCode})`));
-                return;
-            }
-            const fileStream = fs.createWriteStream(tarPath);
-            (0, promises_1.pipeline)(res, fileStream).then(resolve).catch(reject);
-        }).on("error", reject);
+        const MAX_REDIRECTS = 5;
+        const ALLOWED_HOSTS = ["codeload.github.com", "github.com", "objects.githubusercontent.com"];
+        function follow(currentUrl, redirectsLeft) {
+            https_1.default.get(currentUrl, (res) => {
+                // Follow 3xx redirects, validating the destination stays on GitHub
+                if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+                    if (redirectsLeft <= 0) {
+                        reject(new Error("Too many redirects while downloading repo"));
+                        return;
+                    }
+                    const location = res.headers.location;
+                    try {
+                        const redirectHost = new URL(location).hostname;
+                        if (!ALLOWED_HOSTS.includes(redirectHost)) {
+                            reject(new Error(`Redirect to disallowed host: ${redirectHost}`));
+                            return;
+                        }
+                    }
+                    catch {
+                        reject(new Error("Invalid redirect URL"));
+                        return;
+                    }
+                    res.resume(); // drain the response before following
+                    follow(location, redirectsLeft - 1);
+                    return;
+                }
+                if (res.statusCode && res.statusCode >= 400) {
+                    reject(new Error(`Failed to download repo (HTTP ${res.statusCode})`));
+                    return;
+                }
+                const fileStream = fs.createWriteStream(tarPath);
+                (0, promises_1.pipeline)(res, fileStream).then(resolve).catch(reject);
+            }).on("error", reject);
+        }
+        follow(url, MAX_REDIRECTS);
     });
     const tar = await Promise.resolve().then(() => __importStar(require("tar")));
     await tar.x({
