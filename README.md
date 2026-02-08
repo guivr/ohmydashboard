@@ -28,14 +28,6 @@ projects, and time ranges. It is built to be flexible without feeling complex.
 - Customers by country (paying vs all)
 - Local-first storage (SQLite)
 
-## Architecture goals
-
-- Simple to add integrations
-- Supports multiple accounts per integration
-- Supports projects per account and blended rollups
-- Clear metric standards for accurate aggregation
-- Test-driven development for safe iteration
-
 ## Getting Started
 
 ### Option A: one‑line install (CLI)
@@ -77,6 +69,14 @@ locally, never sent to any external server.
 
 From the Settings page, click **Sync** on each connected account. You’ll see
 metrics populate the dashboard immediately.
+
+## Architecture goals
+
+- Simple to add integrations
+- Supports multiple accounts per integration
+- Supports projects per account and blended rollups
+- Clear metric standards for accurate aggregation
+- Test-driven development for safe iteration
 
 ## Local storage
 
