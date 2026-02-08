@@ -20,6 +20,9 @@
     "build": "tsc -p tsconfig.json",
     "prepublishOnly": "pnpm build"
   },
+  "dependencies": {
+    "tar": "^7.5.1"
+  },
   "publishConfig": {
     "access": "public"
   }
