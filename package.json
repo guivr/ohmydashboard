@@ -1,5 +1,5 @@
 {
-  "name": "ohmydashboard",
+  "name": "ohmydashboard-app",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -10,6 +10,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "cli:build": "pnpm --filter ohmydashboard build",
+    "cli:publish": "pnpm --filter ohmydashboard publish --access public",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:studio": "drizzle-kit studio"

@@ -1,0 +1,26 @@
+{
+  "name": "ohmydashboard",
+  "version": "0.1.0",
+  "private": false,
+  "description": "OhMyDashboard CLI",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gvrizzo/ohmydashboard.git",
+    "directory": "packages/cli"
+  },
+  "bin": {
+    "ohmydashboard": "dist/index.js"
+  },
+  "type": "commonjs",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "pnpm build"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
