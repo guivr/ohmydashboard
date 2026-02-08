@@ -69,6 +69,10 @@ interface MetricCardProps {
   >;
   /** Optional subtitle shown below the main value (e.g. "8.2% of revenue") */
   subtitle?: string;
+  /** Show breakdown even when there is only a single ranking entry (default: false) */
+  alwaysShowBreakdown?: boolean;
+  /** Hide the percentage change badge next to the value (default: false) */
+  hideChange?: boolean;
 }
 
 function formatRankingValue(
@@ -194,6 +198,8 @@ export function MetricCard({
   chartId,
   breakdownByDate,
   subtitle,
+  alwaysShowBreakdown = false,
+  hideChange = false,
 }: MetricCardProps) {
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   const [showAllRanking, setShowAllRanking] = useState(false);
@@ -244,7 +250,7 @@ export function MetricCard({
         ? change > 0
         : change < 0;
 
-  const hasRanking = !loading && ranking && ranking.length > 1;
+  const hasRanking = !loading && ranking && (alwaysShowBreakdown ? ranking.length > 0 : ranking.length > 1);
   const topSource = !loading && ranking && ranking.length > 0 ? ranking[0] : null;
 
 
@@ -278,7 +284,7 @@ export function MetricCard({
             <>
               <div className="flex items-baseline gap-2">
                 <span className="text-2xl font-bold">{formattedValue}</span>
-                {change !== null && (
+                {change !== null && !hideChange && (
                   <span
                     className={cn(
                       "text-sm font-semibold",
@@ -308,7 +314,7 @@ export function MetricCard({
                   {subtitle}
                 </p>
               )}
-              {previousValue !== undefined && previousValue !== 0 && (
+              {previousValue !== undefined && (previousValue !== 0 || alwaysShowBreakdown) && (
                 <p className="mt-0.5 text-xs text-muted-foreground">
                   {format === "currency"
                     ? formatCurrency(previousValue, currency)
@@ -318,7 +324,7 @@ export function MetricCard({
                   {description ?? "previous period"}
                 </p>
               )}
-              {change === null && description && (
+              {previousValue === undefined && description && (
                 <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
               )}
 

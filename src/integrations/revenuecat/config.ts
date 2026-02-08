@@ -90,6 +90,12 @@ export const revenuecatMetricTypes: MetricTypeDefinition[] = [
     description: "Number of unique users with activity in the last 28 days",
   },
   {
+    key: "sales_count",
+    label: "Sales",
+    format: "number",
+    description: "Number of completed transactions. Derived from the RevenueCat revenue chart's transaction measure (v3 API).",
+  },
+  {
     key: "subscription_revenue",
     label: "Subscription Revenue",
     format: "currency",

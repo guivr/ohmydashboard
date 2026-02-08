@@ -180,6 +180,13 @@ export interface DashboardData {
   accountRankings: Record<string, RankingEntry[]>;
   blendedRankings: Record<string, RankingEntry[]>;
 
+  // Today section
+  todayTotals: DashboardTotals;
+  yesterdayTotals: DashboardTotals;
+  todayNewMrr: number;
+  todayBlendedRankings: Record<string, RankingEntry[]>;
+  todayLoading: boolean;
+
   // Customers by country
   customersByCountry: CustomersByCountryResponse;
   customersByCountryLoading: boolean;
@@ -849,6 +856,54 @@ export function useDashboardData(): DashboardData {
       accountIds: effectiveAccountIds,
     });
 
+  // ─── Today metrics (always fetches today regardless of date filter) ──────
+  const todayDate = useMemo(() => format(new Date(), "yyyy-MM-dd"), []);
+  const yesterdayDate = useMemo(() => format(subDays(new Date(), 1), "yyyy-MM-dd"), []);
+
+  const { data: todayMetricsData, loading: todayMetricsLoading, refetch: refetchTodayMetrics } =
+    useMetrics({
+      from: todayDate,
+      to: todayDate,
+      accountIds: effectiveAccountIds,
+    });
+
+  const { data: todayTotalsData, refetch: refetchTodayTotals } =
+    useMetrics({
+      from: todayDate,
+      to: todayDate,
+      aggregation: "total",
+      accountIds: effectiveAccountIds,
+    });
+
+  const { data: todayProductMetricsData, refetch: refetchTodayProductMetrics } =
+    useProductMetrics({
+      from: todayDate,
+      to: todayDate,
+      accountIds: effectiveAccountIds,
+    });
+
+  const { data: yesterdayTotalsData, refetch: refetchYesterdayTotals } =
+    useMetrics({
+      from: yesterdayDate,
+      to: yesterdayDate,
+      aggregation: "total",
+      accountIds: effectiveAccountIds,
+    });
+
+  const { data: yesterdayMetricsData, refetch: refetchYesterdayMetrics } =
+    useMetrics({
+      from: yesterdayDate,
+      to: yesterdayDate,
+      accountIds: effectiveAccountIds,
+    });
+
+  const { data: yesterdayProductMetricsData, refetch: refetchYesterdayProductMetrics } =
+    useProductMetrics({
+      from: yesterdayDate,
+      to: yesterdayDate,
+      accountIds: effectiveAccountIds,
+    });
+
   // ─── Derived data ────────────────────────────────────────────────────────
 
   const hasAccounts = useMemo(
@@ -997,6 +1052,12 @@ export function useDashboardData(): DashboardData {
           refetchPrevTotals();
           refetchProductMetrics();
           refetchCustomersByCountry();
+          refetchTodayMetrics();
+          refetchTodayTotals();
+          refetchTodayProductMetrics();
+          refetchYesterdayTotals();
+          refetchYesterdayMetrics();
+          refetchYesterdayProductMetrics();
         })
         .catch((err) => {
           const message = err instanceof Error ? err.message : "Backfill failed";
@@ -1019,6 +1080,12 @@ export function useDashboardData(): DashboardData {
       refetchPrevTotals,
       refetchProductMetrics,
       refetchCustomersByCountry,
+      refetchTodayMetrics,
+      refetchTodayTotals,
+      refetchTodayProductMetrics,
+      refetchYesterdayTotals,
+      refetchYesterdayMetrics,
+      refetchYesterdayProductMetrics,
     ]
   );
 
@@ -1199,6 +1266,148 @@ export function useDashboardData(): DashboardData {
 
     return result;
   }, [blendedRankingsBeforeFeeRate, currentTotals.currency]);
+
+  // ─── Today totals & rankings ──────────────────────────────────────────────
+  const todayDailyMetrics = useMemo(
+    () => (todayMetricsData && "metrics" in todayMetricsData ? todayMetricsData.metrics : []),
+    [todayMetricsData]
+  );
+
+  const todayAccountLabels: Record<string, string> = useMemo(
+    () => (todayMetricsData && "accounts" in todayMetricsData ? todayMetricsData.accounts : {}),
+    [todayMetricsData]
+  );
+
+  const todayTotals = useMemo(() => extractTotals(todayTotalsData), [todayTotalsData]);
+  const yesterdayTotals = useMemo(() => extractTotals(yesterdayTotalsData), [yesterdayTotalsData]);
+  const todayNewMrr = todayTotals.mrr - yesterdayTotals.mrr;
+
+  const resolvedTodayProductData = useMemo(
+    () =>
+      todayProductMetricsData && "metrics" in todayProductMetricsData
+        ? (todayProductMetricsData as ProductMetricsResponse)
+        : null,
+    [todayProductMetricsData]
+  );
+
+  const { blendedRankings: rawTodayBlendedRankings } = useMemo(
+    () =>
+      computeBlendedRankings(
+        todayDailyMetrics,
+        todayAccountLabels,
+        accountIntegrationMap,
+        resolvedTodayProductData
+      ),
+    [todayDailyMetrics, todayAccountLabels, accountIntegrationMap, resolvedTodayProductData]
+  );
+
+  // Yesterday daily metrics + rankings (for MRR delta breakdown)
+  const yesterdayDailyMetrics = useMemo(
+    () => (yesterdayMetricsData && "metrics" in yesterdayMetricsData ? yesterdayMetricsData.metrics : []),
+    [yesterdayMetricsData]
+  );
+
+  const yesterdayAccountLabels: Record<string, string> = useMemo(
+    () => (yesterdayMetricsData && "accounts" in yesterdayMetricsData ? yesterdayMetricsData.accounts : {}),
+    [yesterdayMetricsData]
+  );
+
+  const resolvedYesterdayProductData = useMemo(
+    () =>
+      yesterdayProductMetricsData && "metrics" in yesterdayProductMetricsData
+        ? (yesterdayProductMetricsData as ProductMetricsResponse)
+        : null,
+    [yesterdayProductMetricsData]
+  );
+
+  const { blendedRankings: rawYesterdayBlendedRankings } = useMemo(
+    () =>
+      computeBlendedRankings(
+        yesterdayDailyMetrics,
+        { ...yesterdayAccountLabels, ...todayAccountLabels },
+        accountIntegrationMap,
+        resolvedYesterdayProductData
+      ),
+    [yesterdayDailyMetrics, yesterdayAccountLabels, todayAccountLabels, accountIntegrationMap, resolvedYesterdayProductData]
+  );
+
+  // Apply project group merging to both today and yesterday before diffing
+  const todayBlendedRankingsBeforeDelta = useMemo(
+    () => applyProjectGroupMerging(rawTodayBlendedRankings, groupLookup, resolvedTodayProductData, todayAccountLabels),
+    [rawTodayBlendedRankings, groupLookup, resolvedTodayProductData, todayAccountLabels]
+  );
+
+  const yesterdayBlendedRankings = useMemo(
+    () => applyProjectGroupMerging(rawYesterdayBlendedRankings, groupLookup, resolvedYesterdayProductData, yesterdayAccountLabels),
+    [rawYesterdayBlendedRankings, groupLookup, resolvedYesterdayProductData, yesterdayAccountLabels]
+  );
+
+  // Compute MRR delta breakdown: today snapshot - yesterday snapshot per source
+  const todayBlendedRankings = useMemo(() => {
+    const result = { ...todayBlendedRankingsBeforeDelta };
+
+    const todayMrrEntries = result.mrr ?? [];
+    const yesterdayMrrEntries = yesterdayBlendedRankings.mrr ?? [];
+
+    // Build yesterday lookup by label
+    const yesterdayByLabel = new Map<string, number>();
+    for (const entry of yesterdayMrrEntries) {
+      yesterdayByLabel.set(entry.label, entry.value);
+    }
+
+    // Also collect labels that only exist in yesterday (churned sources)
+    const todayLabels = new Set(todayMrrEntries.map((e) => e.label));
+
+    // Compute deltas for today entries
+    const deltaEntries: RankingEntry[] = todayMrrEntries.map((entry) => {
+      const prevValue = yesterdayByLabel.get(entry.label) ?? 0;
+      const delta = entry.value - prevValue;
+
+      // Compute child deltas if present
+      const children = entry.children?.map((child) => {
+        // Find matching child in yesterday's entry
+        const yesterdayParent = yesterdayMrrEntries.find((e) => e.label === entry.label);
+        const prevChild = yesterdayParent?.children?.find((c) => c.label === child.label);
+        const childDelta = child.value - (prevChild?.value ?? 0);
+        return { ...child, value: childDelta };
+      });
+
+      return {
+        ...entry,
+        value: delta,
+        ...(children ? { children } : {}),
+      };
+    });
+
+    // Add entries that existed yesterday but not today (fully churned)
+    for (const entry of yesterdayMrrEntries) {
+      if (!todayLabels.has(entry.label)) {
+        deltaEntries.push({
+          ...entry,
+          value: -entry.value,
+          children: entry.children?.map((c) => ({ ...c, value: -c.value })),
+        });
+      }
+    }
+
+    // Filter out zero-delta entries, sort by absolute value, recalculate percentages
+    const nonZero = deltaEntries.filter((e) => e.value !== 0);
+    nonZero.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
+    const absTotal = nonZero.reduce((sum, e) => sum + Math.abs(e.value), 0);
+    result.mrr = nonZero.map((e) => ({
+      ...e,
+      percentage: absTotal > 0 ? (Math.abs(e.value) / absTotal) * 100 : 0,
+      children: e.children?.map((c) => {
+        const parentAbs = Math.abs(e.value);
+        return {
+          ...c,
+          percentage: parentAbs > 0 ? (Math.abs(c.value) / parentAbs) * 100 : 0,
+        };
+      }),
+    }));
+
+    return result;
+  }, [todayBlendedRankingsBeforeDelta, yesterdayBlendedRankings]);
 
   // ─── Revenue chart ───────────────────────────────────────────────────────
   const revenueByDay = useMemo(() => {
@@ -1557,7 +1766,13 @@ export function useDashboardData(): DashboardData {
     refetchProductMetrics();
     refetchProjectGroups();
     refetchCustomersByCountry();
-  }, [refetchIntegrations, refetchMetrics, refetchTotals, refetchPrevTotals, refetchProductMetrics, refetchProjectGroups, refetchCustomersByCountry]);
+    refetchTodayMetrics();
+    refetchTodayTotals();
+    refetchTodayProductMetrics();
+    refetchYesterdayTotals();
+    refetchYesterdayMetrics();
+    refetchYesterdayProductMetrics();
+  }, [refetchIntegrations, refetchMetrics, refetchTotals, refetchPrevTotals, refetchProductMetrics, refetchProjectGroups, refetchCustomersByCountry, refetchTodayMetrics, refetchTodayTotals, refetchTodayProductMetrics, refetchYesterdayTotals, refetchYesterdayMetrics, refetchYesterdayProductMetrics]);
 
   const handleFilterChange = useCallback(
     (nextAccountIds: Set<string>, nextProjectIds: Set<string>) => {
@@ -1591,7 +1806,13 @@ export function useDashboardData(): DashboardData {
     refetchProductMetrics();
     refetchProjectGroups();
     refetchCustomersByCountry();
-  }, [refetchIntegrations, refetchMetrics, refetchTotals, refetchPrevTotals, refetchProductMetrics, refetchProjectGroups, refetchCustomersByCountry]);
+    refetchTodayMetrics();
+    refetchTodayTotals();
+    refetchTodayProductMetrics();
+    refetchYesterdayTotals();
+    refetchYesterdayMetrics();
+    refetchYesterdayProductMetrics();
+  }, [refetchIntegrations, refetchMetrics, refetchTotals, refetchPrevTotals, refetchProductMetrics, refetchProjectGroups, refetchCustomersByCountry, refetchTodayMetrics, refetchTodayTotals, refetchTodayProductMetrics, refetchYesterdayTotals, refetchYesterdayMetrics, refetchYesterdayProductMetrics]);
 
   return {
     loading: integrationsLoading || metricsLoading || totalsLoading,
@@ -1629,6 +1850,12 @@ export function useDashboardData(): DashboardData {
 
     accountRankings,
     blendedRankings,
+
+    todayTotals,
+    yesterdayTotals,
+    todayNewMrr,
+    todayBlendedRankings,
+    todayLoading: todayMetricsLoading,
 
     customersByCountry: customersByCountryData,
     customersByCountryLoading,

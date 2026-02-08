@@ -227,6 +227,11 @@ async function fetchChartOptions(
 /**
  * Convert RevenueCat chart data to normalized daily metrics.
  * Handles non-segmented responses only (single value per timestamp).
+ *
+ * For v3 responses with multiple measures (e.g. Revenue chart returns both
+ * Revenue as measure 0 and Transactions as measure 1), this function only
+ * extracts the primary measure (index 0). Use `extractSecondaryMeasure` to
+ * pull additional measures like transaction counts from the same response.
  */
 function normalizeChartData(
   chartData: RevenueCatChartData,
@@ -329,6 +334,81 @@ function normalizeChartData(
       }
       cursor = addDays(cursor, 1);
     }
+  }
+
+  return Array.from(metricsByDate.values()).sort((a, b) =>
+    a.date.localeCompare(b.date)
+  );
+}
+
+/**
+ * Extract a secondary measure (e.g. Transactions at measure index 1) from a
+ * v3 RevenueCat chart response and emit it as a separate metric type.
+ *
+ * The v3 revenue chart returns multiple rows per timestamp — measure 0 is
+ * Revenue, measure 1 is Transactions (number of completed purchases).
+ * `normalizeChartData` only extracts measure 0; this function extracts the
+ * specified measure index.
+ */
+function extractSecondaryMeasure(
+  chartData: RevenueCatChartData,
+  measureIndex: number,
+  outputMetricKey: string,
+  startDate: Date,
+  endDate: Date
+): NormalizedMetric[] {
+  const metricsByDate = new Map<string, NormalizedMetric>();
+
+  if (!chartData.values || chartData.values.length === 0) {
+    return [];
+  }
+
+  for (const dataPoint of chartData.values) {
+    if (!("cohort" in (dataPoint as object))) continue; // v3 only
+
+    const v3 = dataPoint as {
+      cohort: number;
+      value: number | null;
+      measure?: number;
+      incomplete?: boolean;
+    };
+
+    if (v3.measure !== measureIndex) continue;
+
+    const value = v3.value;
+    if (value === null || value === undefined) continue;
+
+    const incomplete = v3.incomplete === true;
+    if (incomplete && value === 0) continue;
+
+    const normalizedTimestamp =
+      v3.cohort < 1_000_000_000_000 ? v3.cohort * 1000 : v3.cohort;
+    const date = new Date(normalizedTimestamp);
+
+    const bufferEnd = addDays(endDate, 1);
+    if (date.getFullYear() < 2000 || date > bufferEnd) continue;
+
+    const dateStr = format(date, "yyyy-MM-dd");
+    metricsByDate.set(dateStr, {
+      metricType: outputMetricKey,
+      value,
+      date: dateStr,
+    });
+  }
+
+  // Zero-fill missing days so charts are continuous
+  let cursor = new Date(startDate);
+  const endTime = endDate.getTime();
+  while (cursor.getTime() <= endTime) {
+    const dateKey = format(cursor, "yyyy-MM-dd");
+    if (!metricsByDate.has(dateKey)) {
+      metricsByDate.set(dateKey, {
+        metricType: outputMetricKey,
+        value: 0,
+        date: dateKey,
+      });
+    }
+    cursor = addDays(cursor, 1);
   }
 
   return Array.from(metricsByDate.values()).sort((a, b) =>
@@ -631,6 +711,7 @@ export const revenuecatFetcher: DataFetcher = {
 
     // ── Step 2: Fetch each chart ──
     let revenueChartFetched = false;
+    let revenueChartData: RevenueCatChartData | null = null;
 
     for (const [chartName, internalKey] of Object.entries(REVENUECAT_CHART_MAP)) {
       const t0 = Date.now();
@@ -641,6 +722,7 @@ export const revenuecatFetcher: DataFetcher = {
 
         if (chartName === "revenue") {
           revenueChartFetched = true;
+          revenueChartData = chartData;
         }
 
         const step: SyncStep = {
@@ -686,6 +768,27 @@ export const revenuecatFetcher: DataFetcher = {
           ...latest,
           date: today,
         });
+      }
+    }
+
+    // ── Step 2c: Extract sales_count from v3 revenue chart's secondary measure ──
+    // The v3 realtime revenue chart includes measure 0 (Revenue) and measure 1
+    // (Transactions). We already extracted Revenue above; now pull Transactions
+    // as sales_count if available.
+    if (revenueChartData) {
+      const salesMetrics = extractSecondaryMeasure(
+        revenueChartData, 1, "sales_count", startDate, endDate
+      );
+      if (salesMetrics.some((m) => m.value > 0)) {
+        allMetrics.push(...salesMetrics);
+        const step: SyncStep = {
+          key: "extract_sales_count",
+          label: "Extract sales count from revenue chart",
+          status: "success",
+          recordCount: salesMetrics.length,
+        };
+        steps.push(step);
+        reportStep?.(step);
       }
     }
 
