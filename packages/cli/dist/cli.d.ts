@@ -1,12 +1,21 @@
-import type fs from "fs";
-import type path from "path";
+import * as fs from "fs";
+import * as path from "path";
 export interface ExecFn {
     (command: string, args: string[], options?: {
         cwd?: string;
     }): Promise<void>;
 }
+export interface DownloadRepoFn {
+    (opts: {
+        owner: string;
+        repo: string;
+        branch: string;
+        targetPath: string;
+    }): Promise<void>;
+}
 export interface CliDeps {
     exec?: ExecFn;
+    downloadRepo?: DownloadRepoFn;
     cwd?: string;
     log?: (line: string) => void;
     fs: typeof fs;
