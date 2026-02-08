@@ -22,14 +22,6 @@ If you are an indie builder, you are constantly switching tabs:
 OhMyDashboard gives you one place to check every day, with filters for accounts,
 projects, and time ranges. It is built to be flexible without feeling complex.
 
-## What you get
-
-- One dashboard for all products and accounts
-- Revenue and sales trends by day
-- Source leaderboards and product groupings
-- Customers by country (paying vs all)
-- Local-first storage (SQLite)
-
 ## Getting Started
 
 ### Option A: one‑line install (CLI)
@@ -69,8 +61,16 @@ locally, never sent to any external server.
 
 ### 4) Sync data
 
-From the Settings page, click **Sync** on each connected account. You’ll see
+From the Settings page, click **Sync** on each connected account. You'll see
 metrics populate the dashboard immediately.
+
+## What you get
+
+- One dashboard for all products and accounts
+- Revenue and sales trends by day
+- Source leaderboards and product groupings
+- Customers by country (paying vs all)
+- Local-first storage (SQLite)
 
 ## Architecture goals
 
