@@ -358,72 +358,77 @@ function storeMetrics(
   accountId: string,
   newMetrics: NormalizedMetric[]
 ): void {
-  const now = new Date().toISOString();
+  // Wrap all writes in a transaction so concurrent reads never see
+  // partially-written metrics (e.g. updated revenue for some products
+  // but stale values for others).
+  db.transaction((tx) => {
+    const now = new Date().toISOString();
 
-  // Batch-ensure all referenced projects first (single pass)
-  ensureProjects(db, accountId, newMetrics);
+    // Batch-ensure all referenced projects first (single pass)
+    ensureProjects(tx as unknown as Db, accountId, newMetrics);
 
-  for (const metric of newMetrics) {
-    const resolvedProjectId = metric.projectId || null;
-    const metadataJson = JSON.stringify(metric.metadata || {});
+    for (const metric of newMetrics) {
+      const resolvedProjectId = metric.projectId || null;
+      const metadataJson = JSON.stringify(metric.metadata || {});
 
-    // Build dedup conditions — projectId and metadata are part of the key.
-    // Including metadata ensures metrics sub-keyed by metadata fields
-    // (e.g. country) don't overwrite each other.
-    const conditions = [
-      eq(metrics.accountId, accountId),
-      eq(metrics.metricType, metric.metricType),
-      eq(metrics.date, metric.date),
-    ];
-    if (resolvedProjectId) {
-      conditions.push(eq(metrics.projectId, resolvedProjectId));
-    } else {
-      conditions.push(isNull(metrics.projectId));
-    }
-    conditions.push(eq(metrics.metadata, metadataJson));
+      // Build dedup conditions — projectId and metadata are part of the key.
+      // Including metadata ensures metrics sub-keyed by metadata fields
+      // (e.g. country) don't overwrite each other.
+      const conditions = [
+        eq(metrics.accountId, accountId),
+        eq(metrics.metricType, metric.metricType),
+        eq(metrics.date, metric.date),
+      ];
+      if (resolvedProjectId) {
+        conditions.push(eq(metrics.projectId, resolvedProjectId));
+      } else {
+        conditions.push(isNull(metrics.projectId));
+      }
+      conditions.push(eq(metrics.metadata, metadataJson));
 
-    const existing = db
-      .select({ id: metrics.id })
-      .from(metrics)
-      .where(and(...conditions))
-      .get();
+      const existing = tx
+        .select({ id: metrics.id })
+        .from(metrics)
+        .where(and(...conditions))
+        .get();
 
-    if (existing) {
-      db.update(metrics)
-        .set({
-          value: metric.value,
-          currency: metric.currency || null,
-          projectId: resolvedProjectId,
-          metadata: metadataJson,
-        })
-        .where(eq(metrics.id, existing.id))
-        .run();
+      if (existing) {
+        tx.update(metrics)
+          .set({
+            value: metric.value,
+            currency: metric.currency || null,
+            projectId: resolvedProjectId,
+            metadata: metadataJson,
+          })
+          .where(eq(metrics.id, existing.id))
+          .run();
 
-      // Clean up any legacy duplicates for the same key.
-      db.delete(metrics)
-        .where(
-          and(
-            ...conditions,
-            ne(metrics.id, existing.id)
+        // Clean up any legacy duplicates for the same key.
+        tx.delete(metrics)
+          .where(
+            and(
+              ...conditions,
+              ne(metrics.id, existing.id)
+            )
           )
-        )
-        .run();
-    } else {
-      db.insert(metrics)
-        .values({
-          id: generateSecureId(),
-          accountId,
-          projectId: resolvedProjectId,
-          metricType: metric.metricType,
-          value: metric.value,
-          currency: metric.currency || null,
-          date: metric.date,
-          metadata: metadataJson,
-          createdAt: now,
-        })
-        .run();
+          .run();
+      } else {
+        tx.insert(metrics)
+          .values({
+            id: generateSecureId(),
+            accountId,
+            projectId: resolvedProjectId,
+            metricType: metric.metricType,
+            value: metric.value,
+            currency: metric.currency || null,
+            date: metric.date,
+            metadata: metadataJson,
+            createdAt: now,
+          })
+          .run();
+      }
     }
-  }
+  });
 }
 
 /**

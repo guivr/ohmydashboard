@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useCallback, useMemo, useEffect, useRef, startTransition } from "react";
 import {
   differenceInCalendarDays,
   endOfDay,
@@ -1758,21 +1758,53 @@ export function useDashboardData(): DashboardData {
   }, [resolvedProductData, enabledProjectIds, dailyMetrics, accountLabels]);
 
   // ─── Callbacks ───────────────────────────────────────────────────────────
-  const handleSyncComplete = useCallback(() => {
-    refetchIntegrations();
-    refetchMetrics();
-    refetchTotals();
-    refetchPrevTotals();
-    refetchProductMetrics();
-    refetchProjectGroups();
-    refetchCustomersByCountry();
-    refetchTodayMetrics();
-    refetchTodayTotals();
-    refetchTodayProductMetrics();
-    refetchYesterdayTotals();
-    refetchYesterdayMetrics();
-    refetchYesterdayProductMetrics();
+
+  // Debounced sync-complete handler: collapses rapid per-account calls into
+  // a single batched refetch so the UI never shows a mix of old and new data.
+  const syncCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const doBatchedRefetch = useCallback(async () => {
+    // Fire all fetches in parallel, wait for all to resolve, then the
+    // state updates from each hook happen in the same microtask and React
+    // batches them into a single re-render.
+    await Promise.all([
+      refetchIntegrations(),
+      refetchMetrics(),
+      refetchTotals(),
+      refetchPrevTotals(),
+      refetchProductMetrics(),
+      refetchProjectGroups(),
+      refetchCustomersByCountry(),
+      refetchTodayMetrics(),
+      refetchTodayTotals(),
+      refetchTodayProductMetrics(),
+      refetchYesterdayTotals(),
+      refetchYesterdayMetrics(),
+      refetchYesterdayProductMetrics(),
+    ]);
   }, [refetchIntegrations, refetchMetrics, refetchTotals, refetchPrevTotals, refetchProductMetrics, refetchProjectGroups, refetchCustomersByCountry, refetchTodayMetrics, refetchTodayTotals, refetchTodayProductMetrics, refetchYesterdayTotals, refetchYesterdayMetrics, refetchYesterdayProductMetrics]);
+
+  const handleSyncComplete = useCallback(() => {
+    // Debounce: if another account finishes within 300ms, only run once.
+    if (syncCompleteTimerRef.current) {
+      clearTimeout(syncCompleteTimerRef.current);
+    }
+    syncCompleteTimerRef.current = setTimeout(() => {
+      syncCompleteTimerRef.current = null;
+      startTransition(() => {
+        doBatchedRefetch();
+      });
+    }, 300);
+  }, [doBatchedRefetch]);
+
+  // Clean up debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (syncCompleteTimerRef.current) {
+        clearTimeout(syncCompleteTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleFilterChange = useCallback(
     (nextAccountIds: Set<string>, nextProjectIds: Set<string>) => {
@@ -1799,20 +1831,10 @@ export function useDashboardData(): DashboardData {
   }, []);
 
   const refetchAll = useCallback(() => {
-    refetchIntegrations();
-    refetchMetrics();
-    refetchTotals();
-    refetchPrevTotals();
-    refetchProductMetrics();
-    refetchProjectGroups();
-    refetchCustomersByCountry();
-    refetchTodayMetrics();
-    refetchTodayTotals();
-    refetchTodayProductMetrics();
-    refetchYesterdayTotals();
-    refetchYesterdayMetrics();
-    refetchYesterdayProductMetrics();
-  }, [refetchIntegrations, refetchMetrics, refetchTotals, refetchPrevTotals, refetchProductMetrics, refetchProjectGroups, refetchCustomersByCountry, refetchTodayMetrics, refetchTodayTotals, refetchTodayProductMetrics, refetchYesterdayTotals, refetchYesterdayMetrics, refetchYesterdayProductMetrics]);
+    startTransition(() => {
+      doBatchedRefetch();
+    });
+  }, [doBatchedRefetch]);
 
   return {
     loading: integrationsLoading || metricsLoading || totalsLoading,

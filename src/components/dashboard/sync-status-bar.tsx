@@ -131,6 +131,11 @@ export function SyncStatusBar({
 
   const hasAccounts = accounts.length > 0;
 
+  // Keep ref in sync so intervals/callbacks always read latest state
+  useEffect(() => {
+    accountStatesRef.current = accountStates;
+  }, [accountStates]);
+
   // Close dropdown on outside click
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -254,9 +259,10 @@ export function SyncStatusBar({
 
     stopProgressPolling();
     progressTimerRef.current = setInterval(async () => {
+      const currentStates = accountStatesRef.current;
       const syncingAccounts = accounts.filter(
         (account) =>
-          accountStates.find((state) => state.accountId === account.id)
+          currentStates.find((state) => state.accountId === account.id)
             ?.status === "syncing"
       );
 
@@ -385,7 +391,7 @@ export function SyncStatusBar({
     });
 
     syncingRef.current = false;
-  }, [accounts, accountStates, onSyncComplete, stopProgressPolling]);
+  }, [accounts, onSyncComplete, stopProgressPolling]);
 
   // Auto-sync on first mount
   useEffect(() => {
