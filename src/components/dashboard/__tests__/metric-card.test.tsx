@@ -331,13 +331,152 @@ describe("MetricCard", () => {
         value={150}
         previousValue={100}
         format="currency"
-        description="vs previous 30 days"
+        description="previous 30 days"
       />
     );
 
     expect(screen.getByText("+50.0%")).toBeInTheDocument();
     // The description is rendered alongside the previous value in a single <p>
-    expect(screen.getByText(/vs previous 30 days/)).toBeInTheDocument();
+    expect(screen.getByText(/previous 30 days/)).toBeInTheDocument();
+  });
+
+  // ─── Today card behavior (alwaysShowBreakdown + hideChange) ────────────────
+
+  it("should show '$0 yesterday' when previousValue is 0 and alwaysShowBreakdown is true", () => {
+    render(
+      <MetricCard
+        title="New Revenue"
+        value={0}
+        previousValue={0}
+        format="currency"
+        description="yesterday"
+        alwaysShowBreakdown
+        hideChange
+      />
+    );
+
+    expect(screen.getByText(/\$0 yesterday/)).toBeInTheDocument();
+  });
+
+  it("should show '0 yesterday' for number format when previousValue is 0 and alwaysShowBreakdown is true", () => {
+    render(
+      <MetricCard
+        title="New Sales"
+        value={0}
+        previousValue={0}
+        format="number"
+        description="yesterday"
+        alwaysShowBreakdown
+        hideChange
+      />
+    );
+
+    expect(screen.getByText(/^0 yesterday$/)).toBeInTheDocument();
+  });
+
+  it("should show formatted previous value with 'yesterday' when previousValue > 0", () => {
+    render(
+      <MetricCard
+        title="New Revenue"
+        value={200}
+        previousValue={150}
+        format="currency"
+        description="yesterday"
+        alwaysShowBreakdown
+        hideChange
+      />
+    );
+
+    expect(screen.getByText(/\$150/)).toBeInTheDocument();
+    expect(screen.getByText(/yesterday/)).toBeInTheDocument();
+  });
+
+  it("should not show percentage change badge when hideChange is true", () => {
+    render(
+      <MetricCard
+        title="New Revenue"
+        value={200}
+        previousValue={100}
+        format="currency"
+        description="yesterday"
+        hideChange
+      />
+    );
+
+    // +100% badge should NOT appear
+    expect(screen.queryByText("+100.0%")).not.toBeInTheDocument();
+    // But the previous value text should still appear
+    expect(screen.getByText(/\$100/)).toBeInTheDocument();
+    expect(screen.getByText(/yesterday/)).toBeInTheDocument();
+  });
+
+  it("should still show percentage change badge when hideChange is not set", () => {
+    render(
+      <MetricCard
+        title="Revenue"
+        value={200}
+        previousValue={100}
+        format="currency"
+        description="previous period"
+      />
+    );
+
+    expect(screen.getByText("+100.0%")).toBeInTheDocument();
+  });
+
+  it("should show breakdown with single ranking entry when alwaysShowBreakdown is true", () => {
+    const singleRanking: RankingEntry[] = [
+      { label: "App Store", integrationName: "RevenueCat", value: 50, percentage: 100 },
+    ];
+
+    render(
+      <MetricCard
+        title="New Sales"
+        value={50}
+        format="number"
+        ranking={singleRanking}
+        alwaysShowBreakdown
+      />
+    );
+
+    // With alwaysShowBreakdown, the breakdown button should appear even for a single entry
+    expect(screen.getByText("Show breakdown")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("Show breakdown"));
+    // "App Store" appears in both crown badge and breakdown row
+    const appStoreEls = screen.getAllByText("App Store");
+    expect(appStoreEls.length).toBe(2);
+  });
+
+  it("should not show breakdown with single ranking entry when alwaysShowBreakdown is false", () => {
+    const singleRanking: RankingEntry[] = [
+      { label: "App Store", integrationName: "RevenueCat", value: 50, percentage: 100 },
+    ];
+
+    render(
+      <MetricCard
+        title="New Sales"
+        value={50}
+        format="number"
+        ranking={singleRanking}
+      />
+    );
+
+    expect(screen.queryByText("Show breakdown")).not.toBeInTheDocument();
+  });
+
+  it("should not show previous value line when previousValue is 0 and alwaysShowBreakdown is false", () => {
+    render(
+      <MetricCard
+        title="Revenue"
+        value={100}
+        previousValue={0}
+        format="currency"
+        description="previous period"
+      />
+    );
+
+    // Without alwaysShowBreakdown, previousValue=0 should be hidden
+    expect(screen.queryByText(/\$0.*previous period/)).not.toBeInTheDocument();
   });
 
   // ─── Loading / skeleton tests ───────────────────────────────────────────────

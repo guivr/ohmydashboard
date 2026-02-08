@@ -55,6 +55,11 @@ export default function Dashboard() {
     breakdownByMetricAndDay,
     accountRankings,
     blendedRankings,
+    todayTotals,
+    yesterdayTotals,
+    todayNewMrr,
+    todayBlendedRankings,
+    todayLoading,
     customersByCountry,
     customersByCountryLoading,
     handleSyncComplete,
@@ -66,21 +71,21 @@ export default function Dashboard() {
     if (!compareEnabled) return undefined;
     switch (dateRangePreset) {
       case "today":
-        return "vs yesterday";
+        return "yesterday";
       case "last_7_days":
-        return "vs previous 7 days";
+        return "previous 7 days";
       case "last_4_weeks":
-        return "vs previous 4 weeks";
+        return "previous 4 weeks";
       case "last_30_days":
-        return "vs previous 30 days";
+        return "previous 30 days";
       case "month_to_date":
-        return "vs previous month-to-date";
+        return "previous month-to-date";
       case "quarter_to_date":
-        return "vs previous quarter-to-date";
+        return "previous quarter-to-date";
       case "year_to_date":
-        return "vs previous year-to-date";
+        return "previous year-to-date";
       case "custom":
-        return "vs previous period";
+        return "previous period";
       case "all_time":
       default:
         return undefined;
@@ -127,6 +132,17 @@ export default function Dashboard() {
       return { ranking: accountRankings[metricType], label: "Source leaderboard" };
     },
     [accountRankings, blendedRankings]
+  );
+
+  const getTodayRanking = useCallback(
+    (metricType: string): { ranking?: RankingEntry[]; label: string } => {
+      const blended = todayBlendedRankings[metricType];
+      if (blended && blended.length > 0) {
+        return { ranking: blended, label: "Breakdown" };
+      }
+      return { ranking: undefined, label: "Breakdown" };
+    },
+    [todayBlendedRankings]
   );
 
   // Revenue breakdown: only show when there's actual subscription/one-time revenue data
@@ -321,6 +337,58 @@ export default function Dashboard() {
       {/* Dashboard content */}
       {(hasAccounts || loading) && filteredAccountCount !== 0 && (
         <div className="space-y-6">
+          {/* Today section — 3 cards, no charts */}
+          <div>
+            <h2 className="mb-3 text-sm font-medium text-muted-foreground">Today</h2>
+            <div className="grid gap-4 md:grid-cols-3">
+              {([
+                {
+                  title: "New Revenue",
+                  current: todayTotals.revenue,
+                  previous: yesterdayTotals.revenue,
+                  format: "currency" as const,
+                  icon: <DollarSign className="h-4 w-4" />,
+                  metricKey: "revenue",
+                },
+                {
+                  title: "New MRR",
+                  current: todayNewMrr,
+                  previous: 0,
+                  format: "currency" as const,
+                  icon: <TrendingUp className="h-4 w-4" />,
+                  metricKey: "mrr",
+                },
+                {
+                  title: "New Sales",
+                  current: todayTotals.salesCount,
+                  previous: yesterdayTotals.salesCount,
+                  format: "number" as const,
+                  icon: <Package className="h-4 w-4" />,
+                  metricKey: "sales_count",
+                },
+              ]).map((card) => {
+                const { ranking, label } = getTodayRanking(card.metricKey);
+                return (
+                  <MetricCard
+                    key={`today-${card.metricKey}`}
+                    title={card.title}
+                    value={card.current}
+                    previousValue={card.previous}
+                    format={card.format}
+                    currency={card.format === "currency" ? todayTotals.currency : undefined}
+                    icon={card.icon}
+                    description="yesterday"
+                    ranking={ranking}
+                    rankingLabel={label}
+                    loading={todayLoading}
+                    alwaysShowBreakdown
+                    hideChange
+                  />
+                );
+              })}
+            </div>
+          </div>
+
           {/* Metric Cards — 2 per row, each with inline chart */}
           <div className="grid gap-4 md:grid-cols-2">
             {metricCards.map((card) => {
