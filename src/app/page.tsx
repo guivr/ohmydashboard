@@ -2,6 +2,7 @@
 
 import { useDashboardData } from "@/hooks/use-dashboard-data";
 import { MetricCard, type RankingEntry } from "@/components/dashboard/metric-card";
+import { CustomersByCountryChart } from "@/components/dashboard/customers-by-country-chart";
 import { EmptyState } from "@/components/dashboard/empty-state";
 import { DashboardFilter } from "@/components/dashboard/dashboard-filter";
 import { DateRangeFilter } from "@/components/dashboard/date-range-filter";
@@ -54,6 +55,8 @@ export default function Dashboard() {
     breakdownByMetricAndDay,
     accountRankings,
     blendedRankings,
+    customersByCountry,
+    customersByCountryLoading,
     handleSyncComplete,
   } = useDashboardData();
 
@@ -196,7 +199,7 @@ export default function Dashboard() {
             title: `Subscription Revenue (${rangeSuffix()})`,
             current: currentTotals.subscriptionRevenue,
             previous: previousTotals.subscriptionRevenue,
-            format: "currency",
+            format: "currency" as const,
             icon: <Repeat className="h-4 w-4" />,
             metricKey: "subscription_revenue",
           },
@@ -204,7 +207,7 @@ export default function Dashboard() {
             title: `One-Time Revenue (${rangeSuffix()})`,
             current: currentTotals.oneTimeRevenue,
             previous: previousTotals.oneTimeRevenue,
-            format: "currency",
+            format: "currency" as const,
             icon: <ShoppingBag className="h-4 w-4" />,
             metricKey: "one_time_revenue",
           },
@@ -212,7 +215,7 @@ export default function Dashboard() {
             title: `Total Sales (${rangeSuffix()})`,
             current: currentTotals.salesCount,
             previous: previousTotals.salesCount,
-            format: "number",
+            format: "number" as const,
             icon: <Package className="h-4 w-4" />,
             metricKey: "sales_count",
           },
@@ -224,10 +227,10 @@ export default function Dashboard() {
             title: `Platform Fees (${rangeSuffix()})`,
             current: currentTotals.platformFees,
             previous: previousTotals.platformFees,
-            format: "currency",
+            format: "currency" as const,
             icon: <Landmark className="h-4 w-4" />,
             metricKey: "platform_fees",
-            changeDirection: "down",
+            changeDirection: "down" as const,
           },
         ]
       : []),
@@ -364,6 +367,21 @@ export default function Dashboard() {
               );
             })}
           </div>
+
+          {/* Customers by Country */}
+          {(customersByCountry.totals.length > 0 || customersByCountryLoading) && (
+            <CustomersByCountryChart
+              data={customersByCountry.totals}
+              bySource={customersByCountry.bySource}
+              accountLabels={customersByCountry.accounts}
+              projectLabels={customersByCountry.projects}
+              accountIntegrationMap={integrations}
+              loading={customersByCountryLoading}
+              accountIds={[...enabledAccountIds]}
+              from={rangeFrom}
+              to={rangeTo}
+            />
+          )}
         </div>
       )}
     </div>

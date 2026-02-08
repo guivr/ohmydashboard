@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils";
 import { useState, useRef, useEffect, useMemo } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { buildCalculationLines, type CalculationInfo } from "./metric-calculation";
+import { BreakdownBar } from "@/components/dashboard/breakdown-bar";
 import {
   ResponsiveContainer,
   AreaChart,
@@ -679,17 +680,11 @@ export function MetricCard({
                                   {formatRankingValue(child.value, format, currency)}
                                 </span>
                               </div>
-                              <div className="business-square relative h-1.5 w-full overflow-hidden rounded-full bg-muted/40">
-                                <div
-                                  className={cn(
-                                    "business-square absolute inset-y-0 left-0 rounded-full opacity-60",
-                                    barColor
-                                  )}
-                                  style={{
-                                    width: `${Math.max(child.percentage, 4)}%`,
-                                  }}
-                                />
-                              </div>
+                              <BreakdownBar
+                                percentage={child.percentage}
+                                containerClassName="business-square"
+                                barClassName={cn("business-square opacity-60", barColor)}
+                              />
                               <div className="mt-0.5 text-right">
                                 <span className="text-[10px] tabular-nums text-muted-foreground">
                                   {child.percentage.toFixed(1)}%
