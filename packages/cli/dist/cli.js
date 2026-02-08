@@ -45,8 +45,8 @@ const child_process_1 = require("child_process");
 const os_1 = __importDefault(require("os"));
 const https_1 = __importDefault(require("https"));
 const promises_1 = require("stream/promises");
-const DEFAULT_REPO = "https://github.com/gvrizzo/ohmydashboard.git";
-const DEFAULT_SSH_REPO = "git@github.com:gvrizzo/ohmydashboard.git";
+const DEFAULT_REPO = "https://github.com/guivr/ohmydashboard.git";
+const DEFAULT_SSH_REPO = "git@github.com:guivr/ohmydashboard.git";
 const DEFAULT_DIR = "ohmydashboard";
 const DEFAULT_BRANCH = "main";
 function parseArgs(args) {

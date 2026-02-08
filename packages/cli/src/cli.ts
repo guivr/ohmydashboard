@@ -36,8 +36,8 @@ interface ParsedArgs {
   useGit: boolean;
 }
 
-const DEFAULT_REPO = "https://github.com/gvrizzo/ohmydashboard.git";
-const DEFAULT_SSH_REPO = "git@github.com:gvrizzo/ohmydashboard.git";
+const DEFAULT_REPO = "https://github.com/guivr/ohmydashboard.git";
+const DEFAULT_SSH_REPO = "git@github.com:guivr/ohmydashboard.git";
 const DEFAULT_DIR = "ohmydashboard";
 const DEFAULT_BRANCH = "main";
 

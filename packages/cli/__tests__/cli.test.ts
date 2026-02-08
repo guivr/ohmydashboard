@@ -8,8 +8,8 @@ import { buildTarballUrl, runCli } from "../src/cli";
 
 describe("ohmydashboard CLI", () => {
   it("builds GitHub tarball URLs without refs/heads", () => {
-    expect(buildTarballUrl("gvrizzo", "ohmydashboard", "main")).toBe(
-      "https://codeload.github.com/gvrizzo/ohmydashboard/tar.gz/main"
+    expect(buildTarballUrl("guivr", "ohmydashboard", "main")).toBe(
+      "https://codeload.github.com/guivr/ohmydashboard/tar.gz/main"
     );
   });
 
@@ -29,7 +29,7 @@ describe("ohmydashboard CLI", () => {
     });
 
     expect(downloadRepo).toHaveBeenCalledWith({
-      owner: "gvrizzo",
+      owner: "guivr",
       repo: "ohmydashboard",
       branch: "main",
       targetPath: path.join(cwd, "ohmydashboard"),
@@ -58,7 +58,7 @@ describe("ohmydashboard CLI", () => {
     });
 
     expect(downloadRepo).toHaveBeenCalledWith({
-      owner: "gvrizzo",
+      owner: "guivr",
       repo: "ohmydashboard",
       branch: "main",
       targetPath: path.join(cwd, "my-dashboard"),
@@ -102,7 +102,7 @@ describe("ohmydashboard CLI", () => {
     });
 
     expect(downloadRepo).toHaveBeenCalledWith({
-      owner: "gvrizzo",
+      owner: "guivr",
       repo: "ohmydashboard",
       branch: "main",
       targetPath: path.join(cwd, "ohmydashboard"),
@@ -126,7 +126,7 @@ describe("ohmydashboard CLI", () => {
     expect(exec).toHaveBeenNthCalledWith(
       1,
       "git",
-      ["clone", "--branch", "main", "https://github.com/gvrizzo/ohmydashboard.git", "ohmydashboard"],
+      ["clone", "--branch", "main", "https://github.com/guivr/ohmydashboard.git", "ohmydashboard"],
       { cwd }
     );
     expect(downloadRepo).not.toHaveBeenCalled();
