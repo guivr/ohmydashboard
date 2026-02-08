@@ -127,6 +127,7 @@ export function SyncStatusBar({
   const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const autoSyncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const accountStatesRef = useRef<AccountSyncState[]>([]);
 
   const hasAccounts = accounts.length > 0;
 

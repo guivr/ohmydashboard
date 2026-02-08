@@ -279,34 +279,10 @@ export default function Dashboard() {
               enabledProjectIds={enabledProjectIds}
               onFilterChange={handleFilterChange}
             />
-            <DateRangeFilter
-              value={dateRangePreset}
-              rangeFrom={rangeFrom}
-              rangeTo={rangeTo}
-              compareEnabled={compareEnabled}
-              onChange={handleDateRangeChange}
-              onCustomRangeChange={handleCustomRangeChange}
-              onCompareToggle={handleCompareToggle}
-            />
-            {compareBackfillStatus === "running" && (
-              <span className="text-xs text-muted-foreground">
-                Backfilling comparison data…
-              </span>
-            )}
-            {compareBackfillStatus === "error" && (
-              <button
-                type="button"
-                onClick={() => setBackfillErrorOpen(true)}
-                className="text-xs font-medium text-destructive hover:underline"
-              >
-                Backfill failed — details
-              </button>
-            )}
           </div>
         ) : integrationsLoading ? (
           <div className="flex items-center gap-2">
             <Skeleton className="h-[30px] w-20" />
-            <Skeleton className="h-[30px] w-40 rounded-lg" />
           </div>
         ) : null}
       </div>
@@ -388,6 +364,34 @@ export default function Dashboard() {
               })}
             </div>
           </div>
+
+          {hasAccounts && !integrationsLoading && (
+            <div className="flex flex-wrap items-center gap-3">
+              <DateRangeFilter
+                value={dateRangePreset}
+                rangeFrom={rangeFrom}
+                rangeTo={rangeTo}
+                compareEnabled={compareEnabled}
+                onChange={handleDateRangeChange}
+                onCustomRangeChange={handleCustomRangeChange}
+                onCompareToggle={handleCompareToggle}
+              />
+              {compareBackfillStatus === "running" && (
+                <span className="text-xs text-muted-foreground">
+                  Backfilling comparison data…
+                </span>
+              )}
+              {compareBackfillStatus === "error" && (
+                <button
+                  type="button"
+                  onClick={() => setBackfillErrorOpen(true)}
+                  className="text-xs font-medium text-destructive hover:underline"
+                >
+                  Backfill failed — details
+                </button>
+              )}
+            </div>
+          )}
 
           {/* Metric Cards — 2 per row, each with inline chart */}
           <div className="grid gap-4 md:grid-cols-2">
