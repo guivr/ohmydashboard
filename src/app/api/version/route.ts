@@ -13,7 +13,7 @@ export async function GET() {
 
   try {
     const res = await fetch(NPM_REGISTRY_URL, {
-      next: { revalidate: 3600 }, // cache for 1 hour
+      cache: "no-store",
     });
 
     if (!res.ok) {
