@@ -121,16 +121,23 @@ export default function SettingsPage() {
                 </span>
               </div>
 
-              <div className="space-y-6">
+              <div className="grid gap-6 md:grid-cols-2">
                 {integrations.map((integration: any) => (
-                  <Card key={integration.id}>
-                    <CardHeader className="flex flex-row items-center justify-between">
-                      <div className="flex items-center gap-3">
+                  <Card
+                    key={integration.id}
+                    className="relative w-full gap-3 overflow-hidden border-border/60 bg-gradient-to-br from-card via-card to-muted/40 py-4 shadow-sm ring-1 ring-border/40"
+                  >
+                    <div
+                      className="absolute -right-10 -top-10 h-36 w-36 rounded-full blur-2xl"
+                      style={{ backgroundColor: `${integration.color}18` }}
+                    />
+                    <CardHeader className="relative flex flex-row items-center justify-between gap-4 pb-3">
+                      <div className="flex items-center gap-4">
                         <div
-                          className="flex h-10 w-10 items-center justify-center rounded-lg"
-                          style={{ backgroundColor: `${integration.color}20` }}
+                          className="flex h-12 w-12 flex-none items-center justify-center rounded-full border border-border/60 bg-background/80 shadow-sm"
+                          style={{ boxShadow: `0 10px 30px ${integration.color}22` }}
                         >
-                          <IntegrationLogo integration={integration.name} size={20} />
+                          <IntegrationLogo integration={integration.name} size={22} />
                         </div>
                         <div>
                           <CardTitle className="text-base">
@@ -150,19 +157,17 @@ export default function SettingsPage() {
                       />
                     </CardHeader>
 
-                    {integration.accounts.length > 0 && (
-                      <>
-                        <Separator />
-                        <CardContent className="pt-4">
-                          <AccountList
-                            accounts={integration.accounts}
-                            onDelete={handleDelete}
-                            onToggle={handleToggle}
-                            onSync={handleSync}
-                          />
-                        </CardContent>
-                      </>
-                    )}
+                    <Separator className="my-2 bg-border/60" />
+                    <CardContent className="relative pt-1">
+                      <div className="mt-2">
+                        <AccountList
+                          accounts={integration.accounts}
+                          onDelete={handleDelete}
+                          onToggle={handleToggle}
+                          onSync={handleSync}
+                        />
+                      </div>
+                    </CardContent>
                   </Card>
                 ))}
               </div>

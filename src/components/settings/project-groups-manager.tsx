@@ -101,10 +101,10 @@ export function ProjectGroupsManager({
   }
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
+    <Card className="relative gap-3 overflow-hidden border-border/60 bg-gradient-to-br from-card via-card to-muted/40 py-4 shadow-sm ring-1 ring-border/40">
+      <CardHeader className="relative flex flex-row items-center justify-between gap-4 pb-3">
         <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full border border-border/60 bg-background/80 shadow-sm">
             <FolderKanban className="h-5 w-5 text-primary" />
           </div>
           <div>
@@ -115,7 +115,12 @@ export function ProjectGroupsManager({
             </p>
           </div>
         </div>
-        <Button variant="outline" size="sm" onClick={handleCreate}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={handleCreate}
+          className="border-border/60 bg-background/80 shadow-sm"
+        >
           <Plus className="mr-2 h-3.5 w-3.5" />
           Create Group
         </Button>
@@ -123,13 +128,13 @@ export function ProjectGroupsManager({
 
       {groups.length > 0 && (
         <>
-          <Separator />
-          <CardContent className="pt-4">
+          <Separator className="my-2 bg-border/60" />
+          <CardContent className="relative pt-2">
             <div className="space-y-3">
               {groups.map((group) => (
                 <div
                   key={group.id}
-                  className="flex items-start justify-between gap-3 rounded-lg border border-border px-4 py-3"
+                  className="flex items-start justify-between gap-3 rounded-xl border border-border/60 bg-gradient-to-r from-muted/40 to-transparent px-4 py-3"
                 >
                   <div className="min-w-0 flex-1">
                     <div className="font-medium">{group.name}</div>

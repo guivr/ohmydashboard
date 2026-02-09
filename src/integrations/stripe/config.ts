@@ -17,7 +17,8 @@ export const stripeCredentials: CredentialField[] = [
     label: "Restricted API Key (read-only)",
     type: "password",
     placeholder: "rk_live_... or rk_test_...",
-    helpUrl: "https://dashboard.stripe.com/apikeys/create",
+    helpUrl:
+      "https://dashboard.stripe.com/apikeys/create?name=OhMyDashboard&permissions%5B%5D=rak_charge_read&permissions%5B%5D=rak_customer_read&permissions%5B%5D=rak_subscription_read&permissions%5B%5D=rak_invoice_read&permissions%5B%5D=rak_balance_read&permissions%5B%5D=rak_balance_transaction_read",
     helpText:
       'Create a restricted key with "Read" access to Charges, Customers, Subscriptions, and Invoices. ' +
       "Invoice read access is needed to accurately classify subscription vs one-time revenue. " +
@@ -127,5 +128,3 @@ export const stripeMetricTypes: MetricTypeDefinition[] = [
     description: "Stripe processing fees from balance transactions",
   },
 ];
-
-

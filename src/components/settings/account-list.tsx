@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Trash2, RefreshCw, Pause, Play } from "lucide-react";
 
@@ -42,15 +41,23 @@ export function AccountList({
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-3">
       {accounts.map((account) => (
         <div
           key={account.id}
-          className="flex items-center justify-between rounded-lg border border-border px-4 py-3"
+          className="group flex items-center justify-between gap-4 rounded-xl border border-border/60 bg-gradient-to-r from-muted/40 to-transparent px-4 py-3 transition hover:border-border"
         >
           <div className="flex items-center gap-3">
             <div>
-              <p className="text-sm font-medium">{account.label}</p>
+              <p className="flex items-center gap-2 text-sm font-medium">
+                {account.label}
+                <span
+                  className={`h-2 w-2 rounded-full ${
+                    account.isActive ? "bg-emerald-500" : "bg-rose-500"
+                  }`}
+                  aria-hidden
+                />
+              </p>
               <p className="text-xs text-muted-foreground">
                 Connected{" "}
                 {new Date(account.createdAt).toLocaleDateString("en-US", {
@@ -60,12 +67,9 @@ export function AccountList({
                 })}
               </p>
             </div>
-            <Badge variant={account.isActive ? "default" : "secondary"}>
-              {account.isActive ? "Active" : "Paused"}
-            </Badge>
           </div>
 
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 rounded-lg border border-border/60 bg-background/70 p-1 shadow-sm">
             <Button
               variant="ghost"
               size="icon"

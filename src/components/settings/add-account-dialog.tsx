@@ -95,7 +95,7 @@ export function AddAccountDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm">
+        <Button variant="outline" size="sm" className="border-border/60 bg-background/80 shadow-sm">
           <Plus className="mr-2 h-3.5 w-3.5" />
           Add Account
         </Button>
