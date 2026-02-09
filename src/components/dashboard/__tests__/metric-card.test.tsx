@@ -355,7 +355,7 @@ describe("MetricCard", () => {
       />
     );
 
-    expect(screen.getByText(/\$0 yesterday/)).toBeInTheDocument();
+    expect(screen.getByText((_content, el) => el?.textContent === "$0 yesterday")).toBeInTheDocument();
   });
 
   it("should show '0 yesterday' for number format when previousValue is 0 and alwaysShowBreakdown is true", () => {
@@ -371,7 +371,7 @@ describe("MetricCard", () => {
       />
     );
 
-    expect(screen.getByText(/^0 yesterday$/)).toBeInTheDocument();
+    expect(screen.getByText((_content, el) => el?.textContent === "0 yesterday")).toBeInTheDocument();
   });
 
   it("should show formatted previous value with 'yesterday' when previousValue > 0", () => {

@@ -93,6 +93,8 @@ interface MetricCardProps {
   alwaysShowBreakdown?: boolean;
   /** Hide the percentage change badge next to the value (default: false) */
   hideChange?: boolean;
+  /** Integration names that bucket data by UTC day — used for transparency badge */
+  utcBucketedIntegrations?: Set<string>;
 }
 
 function formatRankingValue(
@@ -224,6 +226,7 @@ export function MetricCard({
   subtitle,
   alwaysShowBreakdown = false,
   hideChange = false,
+  utcBucketedIntegrations,
 }: MetricCardProps) {
   const [breakdownOpen, setBreakdownOpen] = useState(false);
   const [showAllRanking, setShowAllRanking] = useState(false);
@@ -256,6 +259,29 @@ export function MetricCard({
   }, [chartData]);
   const hasChart = filledChartData.length > 1;
 
+  // Compute when "UTC midnight" falls in the user's local time,
+  // e.g. "8:00 AM" for UTC+8 or "7:00 PM" for UTC-5, and which
+  // direction a sale near that boundary would shift.
+  const { utcResetLabel, utcDayShift } = useMemo(() => {
+    if (!utcBucketedIntegrations || utcBucketedIntegrations.size === 0)
+      return { utcResetLabel: "", utcDayShift: "" };
+    const offsetMin = new Date().getTimezoneOffset(); // e.g. -480 for UTC+8
+    if (offsetMin === 0) return { utcResetLabel: "midnight", utcDayShift: "" };
+    // UTC midnight in local time = 00:00 + offset.
+    // getTimezoneOffset() returns minutes *behind* UTC, so UTC+8 → -480.
+    // Local time of UTC midnight = 00:00 - (-480min) = 08:00 local.
+    const localMinutes = (1440 - offsetMin) % 1440; // ensure positive
+    const h = Math.floor(localMinutes / 60);
+    const m = localMinutes % 60;
+    const ampm = h < 12 ? "AM" : "PM";
+    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    const timeStr = m === 0 ? `${h12}:00 ${ampm}` : `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
+    // offsetMin < 0 → ahead of UTC (e.g. UTC+8) → sales near boundary appear under the previous day
+    // offsetMin > 0 → behind UTC (e.g. UTC-5) → sales near boundary appear under the following day
+    const shift = offsetMin < 0 ? "the previous day" : "the following day";
+    return { utcResetLabel: timeStr, utcDayShift: shift };
+  }, [utcBucketedIntegrations]);
+
   const formattedValue =
     format === "currency"
       ? formatCurrency(value, currency)
@@ -267,6 +293,14 @@ export function MetricCard({
     previousValue !== undefined && previousValue !== 0
       ? ((value - previousValue) / previousValue) * 100
       : null;
+  const changeBadgeVisible = change !== null && !hideChange;
+  const hasPercentText =
+    format === "percentage" ||
+    formattedValue.includes("%") ||
+    (subtitle?.includes("%") ?? false) ||
+    (description?.includes("%") ?? false) ||
+    changeBadgeVisible;
+  const calculationInfo = calculation && hasPercentText ? calculation : null;
   const changeIsGood =
     change === null || change === 0
       ? null
@@ -385,9 +419,9 @@ export function MetricCard({
           ) : (
             <>
               <div className="flex items-baseline gap-2">
-                <span className="text-2xl font-bold">{formattedValue}</span>
+                <span className="sensitive text-2xl font-bold">{formattedValue}</span>
                 {change !== null && !hideChange && (
-                  <span
+                   <span
                     className={cn(
                       "text-sm font-semibold",
                       changeIsGood === null
@@ -400,7 +434,7 @@ export function MetricCard({
                     {formatPercentage(change)}
                   </span>
                 )}
-                {calculation && (
+                {calculationInfo && (
                   <button
                     type="button"
                     onClick={() => setCalcOpen(true)}
@@ -418,11 +452,13 @@ export function MetricCard({
               )}
               {previousValue !== undefined && (previousValue !== 0 || alwaysShowBreakdown) && (
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  {format === "currency"
-                    ? formatCurrency(previousValue, currency)
-                    : format === "percentage"
-                      ? `${previousValue.toFixed(1)}%`
-                      : formatNumber(previousValue)}{" "}
+                  <span className="sensitive">
+                    {format === "currency"
+                      ? formatCurrency(previousValue, currency)
+                      : format === "percentage"
+                        ? `${previousValue.toFixed(1)}%`
+                        : formatNumber(previousValue)}
+                  </span>{" "}
                   {description ?? "previous period"}
                 </p>
               )}
@@ -508,7 +544,15 @@ export function MetricCard({
                         ? formatCurrency(v, currency)
                         : formatNumber(v)
                     }
-                    tick={{ fontSize: 12, fill: resolved.muted }}
+                    tick={(props: any) => (
+                      <g className="sensitive">
+                        <text x={props.x} y={props.y} dy={4} textAnchor="end" fontSize={12} fill={resolved.muted}>
+                          {props.payload?.value != null
+                            ? (format === "currency" ? formatCurrency(props.payload.value, currency) : formatNumber(props.payload.value))
+                            : ""}
+                        </text>
+                      </g>
+                    )}
                     axisLine={false}
                     tickLine={false}
                     width={format === "currency" ? 80 : 40}
@@ -554,7 +598,7 @@ export function MetricCard({
                               Pending today
                             </p>
                           )}
-                          <p className="text-sm font-semibold">{fmtValue}</p>
+                          <p className="sensitive text-sm font-semibold">{fmtValue}</p>
                           {breakdown.length > 0 && (
                             <div className="mt-2 border-t border-border pt-2">
                               <p className="mb-1 text-[11px] font-medium text-muted-foreground">
@@ -594,7 +638,7 @@ export function MetricCard({
                                         </span>
                                       )}
                                     </span>
-                                    <span className="shrink-0 font-medium tabular-nums">
+                                    <span className="sensitive shrink-0 font-medium tabular-nums">
                                       {format === "currency"
                                         ? formatCurrency(item.value, currency)
                                         : formatNumber(item.value)}
@@ -729,6 +773,41 @@ export function MetricCard({
                                   Pending today
                                 </span>
                               )}
+                              {(() => {
+                                if (entryIsPending || !utcBucketedIntegrations || utcBucketedIntegrations.size === 0) return null;
+                                // Collect which integrations on this entry are UTC-bucketed
+                                const utcNames: string[] = [];
+                                if (entry.integrationNames) {
+                                  for (const n of entry.integrationNames) {
+                                    if (utcBucketedIntegrations.has(n)) utcNames.push(n);
+                                  }
+                                } else if (entry.integrationName && utcBucketedIntegrations.has(entry.integrationName)) {
+                                  utcNames.push(entry.integrationName);
+                                }
+                                if (utcNames.length === 0) return null;
+                                // If all integrations on this entry are UTC-bucketed, say "This source"
+                                const allNames = entry.integrationNames ?? (entry.integrationName ? [entry.integrationName] : []);
+                                const allAreUtc = allNames.length > 0 && allNames.every(n => utcBucketedIntegrations.has(n));
+                                const subject = allAreUtc
+                                  ? "This source reports"
+                                  : `${utcNames.join(" and ")} report${utcNames.length === 1 ? "s" : ""}`;
+                                return (
+                                  <TooltipProvider>
+                                    <UiTooltip>
+                                      <TooltipTrigger asChild>
+                                        <span className="inline-flex cursor-help items-center rounded-full border border-muted-foreground/20 bg-muted/50 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                                          UTC
+                                        </span>
+                                      </TooltipTrigger>
+                                      <TooltipContent side="top" className="max-w-xs">
+                                        <p className="text-xs">
+                                          {subject} data by UTC day, which resets at {utcResetLabel} your time. A sale near that hour may appear under {utcDayShift}.
+                                        </p>
+                                      </TooltipContent>
+                                    </UiTooltip>
+                                  </TooltipProvider>
+                                );
+                              })()}
                               </span>
                               {entry.subtitle && (
                                 <span className="mt-0.5 truncate text-[11px] font-medium leading-tight text-muted-foreground/80">
@@ -747,7 +826,7 @@ export function MetricCard({
                         </div>
                         <span
                           className={cn(
-                            "shrink-0 font-mono text-sm tabular-nums",
+                            "sensitive shrink-0 font-mono text-sm tabular-nums",
                             i === 0 ? "font-bold text-foreground" : "font-medium text-foreground/70"
                           )}
                         >
@@ -806,6 +885,22 @@ export function MetricCard({
                                           Pending today
                                         </span>
                                       )}
+                                      {!(child.sourceId && pendingSourceIds?.[child.sourceId]) && utcBucketedIntegrations && utcBucketedIntegrations.size > 0 && child.integrationName && utcBucketedIntegrations.has(child.integrationName) && (
+                                        <TooltipProvider>
+                                          <UiTooltip>
+                                            <TooltipTrigger asChild>
+                                              <span className="inline-flex cursor-help items-center rounded-full border border-muted-foreground/20 bg-muted/50 px-1.5 py-0.5 text-[9px] font-medium uppercase tracking-wide text-muted-foreground/70">
+                                                UTC
+                                              </span>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="top" className="max-w-xs">
+                                              <p className="text-xs">
+                                                This source reports data by UTC day, which resets at {utcResetLabel} your time. A sale near that hour may appear under {utcDayShift}.
+                                              </p>
+                                            </TooltipContent>
+                                          </UiTooltip>
+                                        </TooltipProvider>
+                                      )}
                                     </span>
                                     {child.subtitle && (
                                       <span className="truncate text-[10px] leading-tight text-muted-foreground">
@@ -814,7 +909,7 @@ export function MetricCard({
                                     )}
                                   </span>
                                 </div>
-                                <span className="shrink-0 font-mono text-xs tabular-nums text-foreground/60">
+                                <span className="sensitive shrink-0 font-mono text-xs tabular-nums text-foreground/60">
                                   {formatRankingValue(child.value, format, currency)}
                                 </span>
                               </div>
@@ -855,15 +950,15 @@ export function MetricCard({
         )}
       </Card>
 
-      {calculation && (
+      {calculationInfo && (
         <Dialog open={calcOpen} onOpenChange={setCalcOpen}>
           <DialogContent>
             <DialogHeader>
               <DialogTitle>{title} calculation</DialogTitle>
             </DialogHeader>
             <div className="space-y-2 text-sm text-muted-foreground">
-              {buildCalculationLines(calculation).map((line, i) => (
-                <p key={`${calculation.metricKey}-${i}`}>{line}</p>
+              {buildCalculationLines(calculationInfo).map((line, i) => (
+                <p key={`${calculationInfo.metricKey}-${i}`}>{line}</p>
               ))}
             </div>
             <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
@@ -871,7 +966,7 @@ export function MetricCard({
                 <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
                   Current
                 </div>
-                <div className="text-base font-semibold text-foreground">
+                <div className="sensitive text-base font-semibold text-foreground">
                   {formatRankingValue(value, format, currency)}
                 </div>
               </div>
@@ -879,7 +974,7 @@ export function MetricCard({
                 <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
                   Previous
                 </div>
-                <div className="text-base font-semibold text-foreground">
+                <div className="sensitive text-base font-semibold text-foreground">
                   {previousValue !== undefined
                     ? formatRankingValue(previousValue, format, currency)
                     : "—"}

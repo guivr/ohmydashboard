@@ -204,7 +204,13 @@ export function RevenueChart({
               />
               <YAxis
                 tickFormatter={(v) => formatCurrency(v, currency)}
-                tick={{ fontSize: 12, fill: resolved.muted }}
+                tick={(props: any) => (
+                  <g className="sensitive">
+                    <text x={props.x} y={props.y} dy={4} textAnchor="end" fontSize={12} fill={resolved.muted}>
+                      {props.payload?.value != null ? formatCurrency(props.payload.value, currency) : ""}
+                    </text>
+                  </g>
+                )}
                 axisLine={false}
                 tickLine={false}
                 width={80}
@@ -219,7 +225,7 @@ export function RevenueChart({
                       <p className="text-xs text-muted-foreground">
                         {formatTooltipDate(point.timestamp)}
                       </p>
-                      <p className="text-sm font-semibold">
+                      <p className="sensitive text-sm font-semibold">
                         {formatCurrency(point.value, currency)}
                       </p>
                       {breakdown.length > 0 && (
@@ -244,7 +250,7 @@ export function RevenueChart({
                                   )}
                                   <span className="truncate">{item.label}</span>
                                 </span>
-                                <span className="font-medium">
+                                <span className="sensitive font-medium">
                                   {formatCurrency(item.value, currency)}
                                 </span>
                               </div>

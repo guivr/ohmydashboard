@@ -196,3 +196,14 @@ html.appearance-rounded :where(
 .dark {
   --chart-1: oklch(0.65 0.243 264.376);
 }
+
+/* ─── Blur sensitive values ───────────────────────────────────────────── */
+html.blur-values .sensitive {
+  filter: blur(10px);
+  user-select: none;
+  pointer-events: none;
+  transition: filter 0.2s ease;
+}
+html:not(.blur-values) .sensitive {
+  transition: filter 0.2s ease;
+}

@@ -398,7 +398,7 @@ export function CustomersByCountryChart({
           ) : chartData.length === 0 ? (
             /* Only unknown data, no known countries */
             <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
-              {formatNumber(unknownCount)} customers with unknown location.
+              <span className="sensitive">{formatNumber(unknownCount)}</span> customers with unknown location.
               Country data is only available for customers with a payment method on file.
             </div>
           ) : (
@@ -408,7 +408,7 @@ export function CustomersByCountryChart({
               )}
               {/* Summary */}
               <div className="mb-4 flex items-baseline gap-2">
-                <span className="text-2xl font-bold">
+                <span className="sensitive text-2xl font-bold">
                   {formatNumber(knownTotal)}
                 </span>
                 <span className="text-sm text-muted-foreground">
@@ -429,7 +429,13 @@ export function CustomersByCountryChart({
                       <XAxis
                         type="number"
                         tickFormatter={(v) => formatNumber(v)}
-                        tick={{ fontSize: 12 }}
+                        tick={(props: any) => (
+                          <g className="sensitive">
+                            <text x={props.x} y={props.y} dy={12} textAnchor="middle" fontSize={12}>
+                              {props.payload?.value != null ? formatNumber(props.payload.value) : ""}
+                            </text>
+                          </g>
+                        )}
                         axisLine={false}
                         tickLine={false}
                       />
@@ -457,7 +463,7 @@ export function CustomersByCountryChart({
                                 {point.flag} {point.name}
                               </p>
                               <p className="text-sm font-semibold">
-                                {formatNumber(point.count)} customers
+                                <span className="sensitive">{formatNumber(point.count)}</span> customers
                               </p>
                               <p className="text-xs text-muted-foreground">
                                 {pct}% of identified
@@ -480,7 +486,7 @@ export function CustomersByCountryChart({
                                           />
                                           <span className="truncate">{src.label}</span>
                                         </span>
-                                        <span className="shrink-0 font-medium tabular-nums">
+                                        <span className="sensitive shrink-0 font-medium tabular-nums">
                                           {formatNumber(src.count)}
                                         </span>
                                       </div>
@@ -610,7 +616,7 @@ export function CustomersByCountryChart({
                               </span>
                             );
                           })()}
-                          <span className="tabular-nums font-medium">
+                          <span className="sensitive tabular-nums font-medium">
                             {formatNumber(entry.count)}
                           </span>
                           <span className="w-12 text-right text-xs tabular-nums text-muted-foreground">
@@ -635,7 +641,7 @@ export function CustomersByCountryChart({
                                     {src.label}
                                   </span>
                                 </div>
-                                <span className="shrink-0 font-mono text-xs tabular-nums text-foreground/60">
+                                <span className="sensitive shrink-0 font-mono text-xs tabular-nums text-foreground/60">
                                   {formatNumber(src.count)}
                                 </span>
                               </div>
@@ -728,7 +734,7 @@ export function CustomersByCountryChart({
                                     )}
                                   </div>
                                   <div className="flex items-center gap-2">
-                                    <span className="font-mono tabular-nums text-foreground/60">
+                                    <span className="sensitive font-mono tabular-nums text-foreground/60">
                                       {formatNumber(c.count)}
                                     </span>
                                     <span className="w-10 text-right tabular-nums text-muted-foreground text-[10px]">
@@ -751,7 +757,7 @@ export function CustomersByCountryChart({
                                               {src.label}
                                             </span>
                                           </div>
-                                          <span className="shrink-0 font-mono text-[11px] tabular-nums text-foreground/60">
+                                          <span className="sensitive shrink-0 font-mono text-[11px] tabular-nums text-foreground/60">
                                             {formatNumber(src.count)}
                                           </span>
                                         </div>
@@ -784,13 +790,13 @@ export function CustomersByCountryChart({
                 <div className="mt-4 flex items-center gap-2 rounded-md border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
                   <Globe className="h-3.5 w-3.5 shrink-0" />
                   <span>
-                    {formatNumber(unknownCount)} additional{" "}
+                    <span className="sensitive">{formatNumber(unknownCount)}</span> additional{" "}
                     {unknownCount === 1 ? "customer" : "customers"} with unknown
                     location (
                     {totalAll > 0
                       ? ((unknownCount / totalAll) * 100).toFixed(0)
-                      : 0}
-                    % of total). Typically free-tier signups without a payment
+                      : 0}%{" "}
+                    of total). Typically free-tier signups without a payment
                     method.
                   </span>
                 </div>
