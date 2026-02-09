@@ -198,7 +198,12 @@ export function SyncStatusBar({
             s.accountId === accountId
               ? {
                   ...s,
-                  status: result.success ? "done" : "error",
+                  status:
+                    result.success
+                      ? "done"
+                      : result.error?.toLowerCase().includes("sync already running")
+                        ? "syncing"
+                        : "error",
                   steps: result.steps,
                   recordsProcessed: result.recordsProcessed,
                   error: result.error,
@@ -215,9 +220,25 @@ export function SyncStatusBar({
         if (isCooldown) {
           try {
             const data = await apiGet<{
-              status: { completedAt?: string; startedAt?: string } | null;
+              status: { completedAt?: string; startedAt?: string; status?: string } | null;
             }>(`/api/sync?accountId=${accountId}`);
             lastSyncAt = data.status?.completedAt ?? data.status?.startedAt;
+            if (data.status?.status === "running") {
+              setAccountStates((prev) =>
+                prev.map((s) =>
+                  s.accountId === accountId
+                    ? {
+                        ...s,
+                        status: "syncing",
+                        recordsProcessed: 0,
+                        error: undefined,
+                        lastSyncAt: data.status?.startedAt,
+                      }
+                    : s
+                )
+              );
+              return;
+            }
           } catch {
             lastSyncAt = undefined;
           }
@@ -327,7 +348,12 @@ export function SyncStatusBar({
             idx === i
               ? {
                   ...s,
-                  status: result.success ? "done" : "error",
+                  status:
+                    result.success
+                      ? "done"
+                      : result.error?.toLowerCase().includes("sync already running")
+                        ? "syncing"
+                        : "error",
                   steps: result.steps,
                   recordsProcessed: result.recordsProcessed,
                   error: result.error,
@@ -344,9 +370,25 @@ export function SyncStatusBar({
         if (isCooldown) {
           try {
             const data = await apiGet<{
-              status: { completedAt?: string; startedAt?: string } | null;
+              status: { completedAt?: string; startedAt?: string; status?: string } | null;
             }>(`/api/sync?accountId=${account.id}`);
             lastSyncAt = data.status?.completedAt ?? data.status?.startedAt;
+            if (data.status?.status === "running") {
+              setAccountStates((prev) =>
+                prev.map((s, idx) =>
+                  idx === i
+                    ? {
+                        ...s,
+                        status: "syncing",
+                        recordsProcessed: 0,
+                        error: undefined,
+                        lastSyncAt: data.status?.startedAt,
+                      }
+                    : s
+                )
+              );
+              return;
+            }
           } catch {
             lastSyncAt = undefined;
           }
@@ -640,20 +682,18 @@ function AccountSyncEntry({
         <span className="flex-1 truncate text-xs font-medium text-foreground">
           {label}
         </span>
-        {onRefresh && (
+        {onRefresh && (status === "done" || status === "cooldown" || status === "error") && (
           <button
             type="button"
             aria-label={`Refresh ${label}`}
             className="flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground disabled:opacity-50"
-            disabled={refreshDisabled || status === "syncing"}
+            disabled={refreshDisabled}
             onClick={onRefresh}
           >
             <RefreshCw
-              className={`h-3 w-3 ${
-                status === "syncing" ? "animate-spin" : ""
-              }`}
+              className="h-3 w-3"
             />
-            {status === "syncing" ? "Refreshing" : "Refresh"}
+            Refresh
           </button>
         )}
         <AccountStatusIcon status={status} />
