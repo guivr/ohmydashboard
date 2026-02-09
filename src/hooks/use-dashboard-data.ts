@@ -203,6 +203,9 @@ export interface DashboardData {
   customersByCountry: CustomersByCountryResponse;
   customersByCountryLoading: boolean;
 
+  /** Names of integrations that bucket data by UTC day (e.g. "RevenueCat"). */
+  utcBucketedIntegrations: Set<string>;
+
   // Callbacks
   handleSyncComplete: () => void;
   refetchAll: () => void;
@@ -643,6 +646,18 @@ export function useDashboardData(): DashboardData {
       }
     }
     return m;
+  }, [integrations]);
+
+  // ─── Integration names that bucket data by UTC day ─────────────────────
+  // Used to show a transparency indicator on affected metrics.
+  const utcBucketedIntegrations = useMemo(() => {
+    const names = new Set<string>();
+    for (const integration of integrations ?? []) {
+      if (integration.dateBucketing === "utc" && integration.accounts?.length > 0) {
+        names.add(integration.name);
+      }
+    }
+    return names;
   }, [integrations]);
 
   // ─── Daily metrics ───────────────────────────────────────────────────────
@@ -1515,6 +1530,8 @@ export function useDashboardData(): DashboardData {
 
     customersByCountry: customersByCountryData,
     customersByCountryLoading,
+
+    utcBucketedIntegrations,
 
     handleSyncComplete,
     refetchAll,

@@ -54,6 +54,7 @@ export async function GET() {
     credentials: integration.credentials,
     metricTypes: integration.metricTypes,
     requiredPermissions: integration.requiredPermissions ?? [],
+    dateBucketing: integration.dateBucketing ?? "local",
     accounts: allAccounts
       .filter((a) => a.integrationId === integration.id)
       .map((a) => ({

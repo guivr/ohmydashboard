@@ -22,6 +22,7 @@ const revenuecatIntegration: IntegrationDefinition = {
   metricTypes: revenuecatMetricTypes,
   fetcher: revenuecatFetcher,
   requiredPermissions: revenuecatPermissions,
+  dateBucketing: "utc",
 };
 
 registerIntegration(revenuecatIntegration);

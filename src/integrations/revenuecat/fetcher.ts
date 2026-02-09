@@ -320,13 +320,15 @@ function normalizeChartData(
   }
 
   // Fill missing days with zeros for revenue so charts don't skip $0 days.
+  // This also covers "incomplete" dates (current UTC day) so the account
+  // still appears in dashboard breakdowns with $0 instead of vanishing.
   if (internalMetricKey === "revenue") {
     let cursor = new Date(startDate);
     const endTime = endDate.getTime();
 
     while (cursor.getTime() <= endTime) {
       const dateKey = format(cursor, "yyyy-MM-dd");
-      if (!metricsByDate.has(dateKey) && !incompleteDates.has(dateKey)) {
+      if (!metricsByDate.has(dateKey)) {
         metricsByDate.set(dateKey, {
           metricType: internalMetricKey,
           value: 0,
@@ -338,17 +340,13 @@ function normalizeChartData(
     }
   }
 
-  if (!STOCK_METRIC_KEYS.has(internalMetricKey) && incompleteDates.size > 0) {
-    for (const date of incompleteDates) {
-      metricsByDate.set(`${date}__pending`, {
-        metricType: internalMetricKey,
-        value: 0,
-        date,
-        currency: chartData.yaxis_currency,
-        metadata: { pending: "true" },
-      });
-    }
-  }
+  // NOTE: We intentionally do NOT emit pending markers for incomplete dates.
+  // RevenueCat marks the entire current UTC day as "incomplete" permanently
+  // until the day ends, so a pending badge would be permanently on and
+  // meaningless.  Additionally, RevenueCat aggregates data by UTC day which
+  // can differ from the user's local day — a "pending" badge would wrongly
+  // suggest the data will appear later when it has already been counted in
+  // a different UTC-day bucket.
 
   return Array.from(metricsByDate.values()).sort((a, b) =>
     a.date.localeCompare(b.date)
@@ -420,12 +418,13 @@ function extractSecondaryMeasure(
     });
   }
 
-  // Zero-fill missing days so charts are continuous
+  // Zero-fill missing days so charts are continuous and the account
+  // appears in dashboard breakdowns even on incomplete (current UTC) days.
   let cursor = new Date(startDate);
   const endTime = endDate.getTime();
   while (cursor.getTime() <= endTime) {
     const dateKey = format(cursor, "yyyy-MM-dd");
-    if (!metricsByDate.has(dateKey) && !incompleteDates.has(dateKey)) {
+    if (!metricsByDate.has(dateKey)) {
       metricsByDate.set(dateKey, {
         metricType: outputMetricKey,
         value: 0,
@@ -435,16 +434,7 @@ function extractSecondaryMeasure(
     cursor = addDays(cursor, 1);
   }
 
-  if (incompleteDates.size > 0) {
-    for (const date of incompleteDates) {
-      metricsByDate.set(`${date}__pending`, {
-        metricType: outputMetricKey,
-        value: 0,
-        date,
-        metadata: { pending: "true" },
-      });
-    }
-  }
+  // See note in normalizeChartData — no pending markers for RevenueCat.
 
   return Array.from(metricsByDate.values()).sort((a, b) =>
     a.date.localeCompare(b.date)

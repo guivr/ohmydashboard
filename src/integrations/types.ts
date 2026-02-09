@@ -158,6 +158,20 @@ export interface IntegrationDefinition {
    * Shown to the user before they connect so they know exactly what access is needed.
    */
   requiredPermissions?: RequiredPermission[];
+  /**
+   * How this integration buckets daily data.
+   *
+   * - "local" (default): the fetcher converts raw timestamps to the
+   *   server's local timezone before storing, so dates match the user's
+   *   day boundaries (works correctly when the server runs locally).
+   * - "utc": the provider pre-aggregates data by UTC day and the fetcher
+   *   cannot re-bucket it. Dates may differ from the user's local day,
+   *   especially for timezones far from UTC.
+   *
+   * The dashboard uses this to show a transparency indicator on metrics
+   * that come from UTC-bucketed integrations.
+   */
+  dateBucketing?: "local" | "utc";
 }
 
 export interface MetricTypeDefinition {

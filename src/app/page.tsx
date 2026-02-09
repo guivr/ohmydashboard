@@ -8,6 +8,7 @@ import { DashboardFilter } from "@/components/dashboard/dashboard-filter";
 import { DateRangeFilter } from "@/components/dashboard/date-range-filter";
 import { SyncStatusBar } from "@/components/dashboard/sync-status-bar";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatBackfillErrorDetails } from "@/components/dashboard/backfill-error";
 import {
   DollarSign,
@@ -68,10 +69,27 @@ export default function Dashboard() {
     pendingRangeByMetric,
     customersByCountry,
     customersByCountryLoading,
+    utcBucketedIntegrations,
     handleSyncComplete,
   } = useDashboardData();
 
   const [backfillErrorOpen, setBackfillErrorOpen] = useState(false);
+
+  // Compute when UTC midnight falls in the user's local time for the tooltip,
+  // and which direction a sale near the boundary would shift.
+  const { utcResetLabel, utcDayShift } = useMemo(() => {
+    if (utcBucketedIntegrations.size === 0) return { utcResetLabel: "", utcDayShift: "" };
+    const offsetMin = new Date().getTimezoneOffset();
+    if (offsetMin === 0) return { utcResetLabel: "midnight", utcDayShift: "" };
+    const localMinutes = (1440 - offsetMin) % 1440;
+    const h = Math.floor(localMinutes / 60);
+    const m = localMinutes % 60;
+    const ampm = h < 12 ? "AM" : "PM";
+    const h12 = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    const timeStr = m === 0 ? `${h12}:00 ${ampm}` : `${h12}:${String(m).padStart(2, "0")} ${ampm}`;
+    const shift = offsetMin < 0 ? "the previous day" : "the following day";
+    return { utcResetLabel: timeStr, utcDayShift: shift };
+  }, [utcBucketedIntegrations]);
 
   const comparisonLabel = useCallback(() => {
     if (!compareEnabled) return undefined;
@@ -322,7 +340,27 @@ export default function Dashboard() {
         <div className="space-y-6">
           {/* Today section — 3 cards, no charts */}
           <div>
-            <h2 className="mb-3 text-sm font-medium text-muted-foreground">Today</h2>
+            <div className="mb-3 flex items-center gap-2">
+              <h2 className="text-sm font-medium text-muted-foreground">Today</h2>
+              {utcBucketedIntegrations.size > 0 && (
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <span className="cursor-help border-b border-dotted border-muted-foreground/30 text-[11px] text-muted-foreground/60">
+                        {[...utcBucketedIntegrations].join(", ")} in UTC
+                      </span>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-xs">
+                      <p className="text-xs">
+                        {[...utcBucketedIntegrations].join(", ")} report{utcBucketedIntegrations.size === 1 ? "s" : ""} data
+                        by UTC day, which resets at {utcResetLabel} your time.
+                        A sale near that hour may appear under {utcDayShift} compared to your other sources.
+                      </p>
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              )}
+            </div>
             <div className="grid gap-4 md:grid-cols-3">
               {([
                 {
@@ -372,6 +410,7 @@ export default function Dashboard() {
                     loading={todayLoading}
                     alwaysShowBreakdown
                     hideChange
+                    utcBucketedIntegrations={utcBucketedIntegrations}
                   />
                 );
               })}
@@ -456,6 +495,7 @@ export default function Dashboard() {
                   pendingByDate={pendingByMetricAndDay[card.metricKey]}
                   loading={metricsLoading}
                   subtitle={"subtitle" in card ? (card as any).subtitle : undefined}
+                  utcBucketedIntegrations={utcBucketedIntegrations}
                 />
               );
             })}
