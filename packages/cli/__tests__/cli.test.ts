@@ -13,13 +13,118 @@ describe("ohmydashboard CLI", () => {
     );
   });
 
-  it("clones the default repo into the default folder and installs deps", async () => {
+  it("git clones the default repo into the default folder and installs deps", async () => {
     const exec = vi.fn().mockResolvedValue(undefined);
     const downloadRepo = vi.fn().mockResolvedValue(undefined);
     const logs: string[] = [];
     const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ohmydashboard-test-"));
 
     await runCli([], {
+      exec,
+      downloadRepo,
+      cwd,
+      log: (line) => logs.push(line),
+      fs,
+      path,
+    });
+
+    expect(exec).toHaveBeenNthCalledWith(
+      1,
+      "git",
+      ["clone", "--branch", "main", "https://github.com/guivr/ohmydashboard.git", "ohmydashboard"],
+      { cwd }
+    );
+    expect(downloadRepo).not.toHaveBeenCalled();
+    expect(exec).toHaveBeenNthCalledWith(
+      2,
+      "pnpm",
+      ["install"],
+      { cwd: path.join(cwd, "ohmydashboard") }
+    );
+    const output = logs.join("\n");
+    expect(output).toContain("Next steps");
+    expect(output).toContain("cd ohmydashboard");
+    expect(output).toContain("pnpm dev");
+    expect(output).toContain("To update later:");
+    expect(output).toContain("git pull");
+  });
+
+  it("accepts a custom target directory", async () => {
+    const exec = vi.fn().mockResolvedValue(undefined);
+    const downloadRepo = vi.fn().mockResolvedValue(undefined);
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ohmydashboard-test-"));
+
+    await runCli(["my-dashboard"], {
+      exec,
+      downloadRepo,
+      cwd,
+      log: () => {},
+      fs,
+      path,
+    });
+
+    expect(exec).toHaveBeenNthCalledWith(
+      1,
+      "git",
+      ["clone", "--branch", "main", "https://github.com/guivr/ohmydashboard.git", "my-dashboard"],
+      { cwd }
+    );
+    expect(downloadRepo).not.toHaveBeenCalled();
+  });
+
+  it("accepts a custom repo via --repo", async () => {
+    const exec = vi.fn().mockResolvedValue(undefined);
+    const downloadRepo = vi.fn().mockResolvedValue(undefined);
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ohmydashboard-test-"));
+
+    await runCli(["--repo", "https://github.com/example/ohmydashboard.git"], {
+      exec,
+      downloadRepo,
+      cwd,
+      log: () => {},
+      fs,
+      path,
+    });
+
+    expect(exec).toHaveBeenNthCalledWith(
+      1,
+      "git",
+      ["clone", "--branch", "main", "https://github.com/example/ohmydashboard.git", "ohmydashboard"],
+      { cwd }
+    );
+    expect(downloadRepo).not.toHaveBeenCalled();
+  });
+
+  it("passes --branch to git clone when provided", async () => {
+    const exec = vi.fn().mockResolvedValue(undefined);
+    const downloadRepo = vi.fn().mockResolvedValue(undefined);
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ohmydashboard-test-"));
+
+    await runCli(["--branch", "dev"], {
+      exec,
+      downloadRepo,
+      cwd,
+      log: () => {},
+      fs,
+      path,
+    });
+
+    expect(exec).toHaveBeenNthCalledWith(
+      1,
+      "git",
+      ["clone", "--branch", "dev", "https://github.com/guivr/ohmydashboard.git", "ohmydashboard"],
+      { cwd }
+    );
+    expect(downloadRepo).not.toHaveBeenCalled();
+  });
+
+  it("uses tarball download when --no-git is provided", async () => {
+    const exec = vi.fn().mockResolvedValue(undefined);
+    const downloadRepo = vi.fn().mockResolvedValue(undefined);
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ohmydashboard-test-"));
+    const logs: string[] = [];
+
+    await runCli(["--no-git"], {
       exec,
       downloadRepo,
       cwd,
@@ -41,98 +146,7 @@ describe("ohmydashboard CLI", () => {
       { cwd: path.join(cwd, "ohmydashboard") }
     );
     const output = logs.join("\n");
-    expect(output).toContain("Next steps");
-    expect(output).toContain("cd ohmydashboard");
-    expect(output).toContain("pnpm dev");
-  });
-
-  it("accepts a custom target directory", async () => {
-    const exec = vi.fn().mockResolvedValue(undefined);
-    const downloadRepo = vi.fn().mockResolvedValue(undefined);
-    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ohmydashboard-test-"));
-
-    await runCli(["my-dashboard"], {
-      exec,
-      downloadRepo,
-      cwd,
-      log: () => {},
-      fs,
-      path,
-    });
-
-    expect(downloadRepo).toHaveBeenCalledWith({
-      owner: "guivr",
-      repo: "ohmydashboard",
-      branch: "main",
-      targetPath: path.join(cwd, "my-dashboard"),
-    });
-  });
-
-  it("accepts a custom repo via --repo", async () => {
-    const exec = vi.fn().mockResolvedValue(undefined);
-    const downloadRepo = vi.fn().mockResolvedValue(undefined);
-    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ohmydashboard-test-"));
-
-    await runCli(["--repo", "https://github.com/example/ohmydashboard.git"], {
-      exec,
-      downloadRepo,
-      cwd,
-      log: () => {},
-      fs,
-      path,
-    });
-
-    expect(downloadRepo).toHaveBeenCalledWith({
-      owner: "example",
-      repo: "ohmydashboard",
-      branch: "main",
-      targetPath: path.join(cwd, "ohmydashboard"),
-    });
-  });
-
-  it("passes --branch to the download when provided", async () => {
-    const exec = vi.fn().mockResolvedValue(undefined);
-    const downloadRepo = vi.fn().mockResolvedValue(undefined);
-    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ohmydashboard-test-"));
-
-    await runCli(["--branch", "main"], {
-      exec,
-      downloadRepo,
-      cwd,
-      log: () => {},
-      fs,
-      path,
-    });
-
-    expect(downloadRepo).toHaveBeenCalledWith({
-      owner: "guivr",
-      repo: "ohmydashboard",
-      branch: "main",
-      targetPath: path.join(cwd, "ohmydashboard"),
-    });
-  });
-
-  it("uses git clone when --git is provided", async () => {
-    const exec = vi.fn().mockResolvedValue(undefined);
-    const downloadRepo = vi.fn().mockResolvedValue(undefined);
-    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), "ohmydashboard-test-"));
-
-    await runCli(["--git"], {
-      exec,
-      downloadRepo,
-      cwd,
-      log: () => {},
-      fs,
-      path,
-    });
-
-    expect(exec).toHaveBeenNthCalledWith(
-      1,
-      "git",
-      ["clone", "--branch", "main", "https://github.com/guivr/ohmydashboard.git", "ohmydashboard"],
-      { cwd }
-    );
-    expect(downloadRepo).not.toHaveBeenCalled();
+    expect(output).not.toContain("To update later:");
   });
 
   it("errors when the target directory already exists", async () => {

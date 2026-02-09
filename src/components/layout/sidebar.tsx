@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { LayoutDashboard, Settings, RefreshCw } from "lucide-react";
+import { LayoutDashboard, Settings, RefreshCw, ArrowUpCircle } from "lucide-react";
 import { apiPost } from "@/lib/api-client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { BlurToggle } from "@/components/ui/blur-toggle";
+import { useUpdateCheck } from "@/hooks/use-update-check";
 import { useState } from "react";
 
 const navItems = [
@@ -26,6 +27,7 @@ const navItems = [
 export function Sidebar() {
   const pathname = usePathname();
   const [syncing, setSyncing] = useState(false);
+  const update = useUpdateCheck();
 
   const handleSync = async () => {
     setSyncing(true);
@@ -71,6 +73,22 @@ export function Sidebar() {
           );
         })}
       </nav>
+
+      {/* Update banner */}
+      {update?.updateAvailable && (
+        <div className="mx-3 rounded-md border border-border bg-accent/50 p-3">
+          <div className="flex items-center gap-2 text-xs font-medium text-accent-foreground">
+            <ArrowUpCircle className="h-3.5 w-3.5 shrink-0" />
+            Update available
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            v{update.latest} is out (you have v{update.current})
+          </p>
+          <code className="mt-2 block rounded bg-muted px-2 py-1 text-[10px] text-muted-foreground">
+            git pull && pnpm install
+          </code>
+        </div>
+      )}
 
       {/* Theme + Blur + Sync */}
       <div className="border-t border-border p-3 space-y-2">

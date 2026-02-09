@@ -34,6 +34,7 @@ interface ParsedArgs {
   useSsh: boolean;
   branch: string;
   useGit: boolean;
+  noGit: boolean;
 }
 
 const DEFAULT_REPO = "https://github.com/guivr/ohmydashboard.git";
@@ -48,6 +49,7 @@ function parseArgs(args: string[]): ParsedArgs {
   let useSsh = false;
   let branch = DEFAULT_BRANCH;
   let useGit = false;
+  let noGit = false;
 
   for (let i = 0; i < args.length; i += 1) {
     const arg = args[i];
@@ -58,6 +60,10 @@ function parseArgs(args: string[]): ParsedArgs {
     }
     if (arg === "--git") {
       useGit = true;
+      continue;
+    }
+    if (arg === "--no-git") {
+      noGit = true;
       continue;
     }
     if (arg === "--ssh") {
@@ -85,7 +91,7 @@ function parseArgs(args: string[]): ParsedArgs {
     }
   }
 
-  return { targetDir, repoUrl, showHelp, useSsh, branch, useGit };
+  return { targetDir, repoUrl, showHelp, useSsh, branch, useGit, noGit };
 }
 
 function defaultExec(command: string, args: string[], options?: { cwd?: string }) {
@@ -194,9 +200,17 @@ export async function runCli(args: string[], deps: CliDeps) {
   const cwd = deps.cwd ?? process.cwd();
   const log = deps.log ?? console.log;
 
-  const { targetDir, repoUrl, showHelp, useSsh, branch, useGit } = parseArgs(args);
+  const { targetDir, repoUrl, showHelp, useSsh, branch, useGit, noGit } = parseArgs(args);
   if (showHelp) {
-    log("Usage: npx ohmydashboard [target-dir] [--repo <url>] [--branch <name>] [--git] [--ssh]");
+    log("Usage: npx ohmydashboard [target-dir] [--repo <url>] [--branch <name>] [--no-git] [--ssh]");
+    log("");
+    log("Options:");
+    log("  [target-dir]       Directory name (default: ohmydashboard)");
+    log("  --repo <url>       Custom GitHub repo URL");
+    log("  --branch <name>    Branch to clone (default: main)");
+    log("  --no-git           Download as tarball instead of git clone");
+    log("  --ssh              Use SSH URL for git clone");
+    log("  --help, -h         Show this help message");
     return;
   }
 
@@ -205,7 +219,9 @@ export async function runCli(args: string[], deps: CliDeps) {
     throw new Error("Target directory already exists");
   }
 
-  if (useGit) {
+  const shouldUseGit = noGit ? false : true;
+
+  if (shouldUseGit) {
     const cloneArgs = ["clone"];
     if (branch) {
       cloneArgs.push("--branch", branch);
@@ -215,7 +231,7 @@ export async function runCli(args: string[], deps: CliDeps) {
   } else {
     const parsed = parseGitHubRepo(repoUrl);
     if (!parsed) {
-      throw new Error("Repo must be a GitHub URL or owner/repo (use --git for other hosts).");
+      throw new Error("Repo must be a GitHub URL or owner/repo.");
     }
     await downloadRepo({
       owner: parsed.owner,
@@ -236,4 +252,9 @@ export async function runCli(args: string[], deps: CliDeps) {
   log("  2) pnpm dev");
   log("");
   log("Then open http://localhost:3000 and connect integrations at /settings");
+  if (shouldUseGit) {
+    log("");
+    log("To update later:");
+    log(`  cd ${targetDir} && git pull && pnpm install`);
+  }
 }
