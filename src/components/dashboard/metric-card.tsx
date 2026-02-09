@@ -16,9 +16,15 @@ import {
   Area,
   XAxis,
   YAxis,
-  Tooltip,
+  Tooltip as ChartTooltip,
   CartesianGrid,
 } from "recharts";
+import {
+  Tooltip as UiTooltip,
+  TooltipTrigger,
+  TooltipContent,
+  TooltipProvider,
+} from "@/components/ui/tooltip";
 
 export interface RankingEntry {
   label: string;
@@ -48,6 +54,7 @@ interface MetricCardProps {
   currency?: string;
   icon?: React.ReactNode;
   description?: string;
+  pending?: boolean;
   /** Direction that indicates a "good" change (default: "up"). */
   changeDirection?: "up" | "down";
   ranking?: RankingEntry[];
@@ -65,8 +72,21 @@ interface MetricCardProps {
   /** Per-date source breakdown for chart tooltip (date -> top-N entries) */
   breakdownByDate?: Record<
     string,
-    Array<{ label: string; value: number; integrationName?: string; integrationNames?: string[] }>
+    Array<{
+      label: string;
+      value: number;
+      integrationName?: string;
+      integrationNames?: string[];
+      sourceId?: string;
+      pending?: boolean;
+    }>
   >;
+  /** Per-date pending flag (date -> pending) */
+  pendingByDate?: Record<string, boolean>;
+  /** Per-source pending flag (sourceId -> pending) */
+  pendingSourceIds?: Record<string, boolean>;
+  /** Pending sources to show when missing from breakdown */
+  pendingSources?: Array<{ sourceId: string; label: string; integrationName?: string }>;
   /** Optional subtitle shown below the main value (e.g. "8.2% of revenue") */
   subtitle?: string;
   /** Show breakdown even when there is only a single ranking entry (default: false) */
@@ -188,6 +208,7 @@ export function MetricCard({
   currency = "USD",
   icon,
   description,
+  pending = false,
   changeDirection = "up",
   ranking,
   rankingLabel = "Source leaderboard",
@@ -197,6 +218,9 @@ export function MetricCard({
   chartColor,
   chartId,
   breakdownByDate,
+  pendingByDate,
+  pendingSourceIds,
+  pendingSources,
   subtitle,
   alwaysShowBreakdown = false,
   hideChange = false,
@@ -256,11 +280,53 @@ export function MetricCard({
 
 
   const rankingList = ranking ?? [];
+  const pendingIntegrationNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const source of pendingSources ?? []) {
+      if (source.integrationName) names.add(source.integrationName);
+    }
+    return Array.from(names);
+  }, [pendingSources]);
+  const rankingSourceIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const entry of rankingList) {
+      if (entry.sourceId) ids.add(entry.sourceId);
+      if (entry.children) {
+        for (const child of entry.children) {
+          if (child.sourceId) ids.add(child.sourceId);
+        }
+      }
+    }
+    return ids;
+  }, [rankingList]);
+
+
+  const pendingExtras = useMemo(() => {
+    if (!pendingSources || pendingSources.length === 0) return [];
+    const extras: RankingEntry[] = [];
+    for (const pendingSource of pendingSources) {
+      if (rankingSourceIds.has(pendingSource.sourceId)) continue;
+      extras.push({
+        label: pendingSource.label,
+        integrationName: pendingSource.integrationName ?? "Unknown",
+        value: 0,
+        percentage: 0,
+        sourceId: pendingSource.sourceId,
+      });
+    }
+    return extras;
+  }, [pendingSources, rankingSourceIds]);
+
+  const breakdownRanking = useMemo(
+    () => [...rankingList, ...pendingExtras],
+    [rankingList, pendingExtras]
+  );
+
   const collapsedCount =
-    rankingList.length > 5 ? rankingList.length - 5 : 0;
+    breakdownRanking.length > 5 ? breakdownRanking.length - 5 : 0;
   const visibleRanking = showAllRanking
-    ? rankingList
-    : rankingList.slice(0, 5);
+    ? breakdownRanking
+    : breakdownRanking.slice(0, 5);
 
   return (
     <div ref={cardRef} className="h-full">
@@ -268,9 +334,45 @@ export function MetricCard({
         className="h-full gap-2"
       >
         <CardHeader className="flex flex-row items-center justify-between pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">
-            {title}
-          </CardTitle>
+          <div className="flex items-center gap-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              {title}
+            </CardTitle>
+            {pending && !loading && (
+              <TooltipProvider>
+                <UiTooltip>
+                  <TooltipTrigger asChild>
+                    <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600">
+                      Pending today
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent sideOffset={6}>
+                    <div className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold">Pending today</span>
+                      <span className="text-xs text-muted-foreground">
+                        Some providers finalize today’s revenue later in the day.
+                      </span>
+                      {pendingIntegrationNames.length > 0 ? (
+                        <div className="flex flex-wrap items-center gap-2 text-xs">
+                          <span className="text-muted-foreground">Sources:</span>
+                          {pendingIntegrationNames.map((name) => (
+                            <span key={name} className="inline-flex items-center gap-1.5">
+                              <IntegrationLogo integration={name} size={14} />
+                              <span>{name}</span>
+                            </span>
+                          ))}
+                        </div>
+                      ) : (
+                        <span className="text-xs">
+                          Some providers are still processing today.
+                        </span>
+                      )}
+                    </div>
+                  </TooltipContent>
+                </UiTooltip>
+              </TooltipProvider>
+            )}
+          </div>
           {icon && <div className="text-muted-foreground">{icon}</div>}
         </CardHeader>
         <CardContent>
@@ -411,7 +513,7 @@ export function MetricCard({
                     tickLine={false}
                     width={format === "currency" ? 80 : 40}
                   />
-                  <Tooltip
+                  <ChartTooltip
                     content={({ active, payload }) => {
                       if (!active || !payload?.length) return null;
                       const point = payload[0].payload;
@@ -422,6 +524,7 @@ export function MetricCard({
                             ? `${point.value.toFixed(1)}%`
                             : formatNumber(point.value);
                       const rawBreakdown = breakdownByDate?.[point.date] ?? [];
+                      const isPending = pendingByDate?.[point.date] ?? false;
                       // Expand group entries that are open in the breakdown
                       const breakdown = rawBreakdown.flatMap((item) => {
                         if (expandedGroups.has(item.label) && item.integrationNames && item.integrationNames.length > 1) {
@@ -446,6 +549,11 @@ export function MetricCard({
                           <p className="text-xs text-muted-foreground">
                             {formatTooltipDate(point.timestamp)}
                           </p>
+                          {isPending && (
+                            <p className="mt-1 inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-600">
+                              Pending today
+                            </p>
+                          )}
                           <p className="text-sm font-semibold">{fmtValue}</p>
                           {breakdown.length > 0 && (
                             <div className="mt-2 border-t border-border pt-2">
@@ -453,12 +561,12 @@ export function MetricCard({
                                 Top sources
                               </p>
                               <div className="space-y-1">
-                                {breakdown.map((item, idx) => (
-                                  <div
-                                    key={`${item.integrationName ?? "unknown"}:${item.label}:${idx}`}
-                                    className="flex items-center justify-between gap-4 text-xs"
-                                  >
-                                    <span className="flex items-center gap-1.5 truncate">
+                                  {breakdown.map((item, idx) => (
+                                    <div
+                                      key={`${item.integrationName ?? "unknown"}:${item.label}:${idx}`}
+                                      className="flex items-center justify-between gap-4 text-xs"
+                                    >
+                                      <span className="flex items-center gap-1.5 truncate">
                                       {item.integrationNames && item.integrationNames.length > 1 ? (
                                         <span className="relative flex shrink-0 items-center" style={{ width: 14 + (item.integrationNames.length - 1) * 9, height: 14 }}>
                                           {item.integrationNames.map((name, logoIdx) => (
@@ -480,6 +588,11 @@ export function MetricCard({
                                         </span>
                                       ) : null}
                                       <span className="truncate">{item.label}</span>
+                                      {item.pending && (
+                                        <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-600">
+                                          Pending today
+                                        </span>
+                                      )}
                                     </span>
                                     <span className="shrink-0 font-medium tabular-nums">
                                       {format === "currency"
@@ -542,6 +655,11 @@ export function MetricCard({
                   const medalStyle = i < 3 ? MEDAL_STYLES[i] : null;
                   const hasChildren = entry.children && entry.children.length > 0;
                   const isExpanded = expandedGroups.has(entry.label);
+                  const entryIsPending =
+                    (entry.sourceId && pendingSourceIds?.[entry.sourceId]) ||
+                    (entry.children?.some((child) =>
+                      child.sourceId ? pendingSourceIds?.[child.sourceId] : false
+                    ) ?? false);
 
                   return (
                     <div
@@ -596,20 +714,27 @@ export function MetricCard({
                               className="shrink-0"
                             />
                           )}
-                          <span className="flex min-w-0 flex-col">
-                            <span
-                              className={cn(
-                                "truncate text-sm font-medium leading-none",
-                                i === 0 ? "text-foreground" : "text-foreground/80"
+                            <span className="flex min-w-0 flex-col">
+                              <span className="flex min-w-0 items-center gap-2">
+                                <span
+                                  className={cn(
+                                    "truncate text-sm font-medium leading-none",
+                                    i === 0 ? "text-foreground" : "text-foreground/80"
+                                  )}
+                                >
+                                  {entry.label}
+                                </span>
+                              {entryIsPending && (
+                                <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-600">
+                                  Pending today
+                                </span>
                               )}
-                            >
-                              {entry.label}
-                            </span>
-                            {entry.subtitle && (
-                              <span className="mt-0.5 truncate text-[11px] font-medium leading-tight text-muted-foreground/80">
-                                {entry.subtitle}
                               </span>
-                            )}
+                              {entry.subtitle && (
+                                <span className="mt-0.5 truncate text-[11px] font-medium leading-tight text-muted-foreground/80">
+                                  {entry.subtitle}
+                                </span>
+                              )}
                           </span>
                           {hasChildren && (
                             <ChevronDown
@@ -672,8 +797,15 @@ export function MetricCard({
                                     className="shrink-0"
                                   />
                                   <span className="flex min-w-0 flex-col">
-                                    <span className="truncate text-xs font-medium text-foreground/70">
-                                      {child.label}
+                                    <span className="flex min-w-0 items-center gap-2">
+                                      <span className="truncate text-xs font-medium text-foreground/70">
+                                        {child.label}
+                                      </span>
+                                      {child.sourceId && pendingSourceIds?.[child.sourceId] && (
+                                        <span className="inline-flex items-center rounded-full border border-amber-500/30 bg-amber-500/10 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-600">
+                                          Pending today
+                                        </span>
+                                      )}
                                     </span>
                                     {child.subtitle && (
                                       <span className="truncate text-[10px] leading-tight text-muted-foreground">

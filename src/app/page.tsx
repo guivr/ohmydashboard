@@ -53,13 +53,19 @@ export default function Dashboard() {
     metricsByDay,
     revenueBreakdownByDay,
     breakdownByMetricAndDay,
+    pendingByMetricAndDay,
+    pendingSourceIdsByMetric,
+    pendingSourcesByMetric,
     accountRankings,
     blendedRankings,
     todayTotals,
     yesterdayTotals,
     todayNewMrr,
+    yesterdayNewMrr,
     todayBlendedRankings,
     todayLoading,
+    pendingTodayByMetric,
+    pendingRangeByMetric,
     customersByCountry,
     customersByCountryLoading,
     handleSyncComplete,
@@ -166,6 +172,7 @@ export default function Dashboard() {
     metricKey: string;
     changeDirection?: "up" | "down";
     subtitle?: string;
+    pending?: boolean;
   };
 
   const metricCards: MetricCardConfig[] = [
@@ -325,14 +332,16 @@ export default function Dashboard() {
                   format: "currency" as const,
                   icon: <DollarSign className="h-4 w-4" />,
                   metricKey: "revenue",
+                  pending: pendingTodayByMetric.revenue ?? false,
                 },
                 {
                   title: "New MRR",
                   current: todayNewMrr,
-                  previous: 0,
+                  previous: yesterdayNewMrr,
                   format: "currency" as const,
                   icon: <TrendingUp className="h-4 w-4" />,
                   metricKey: "mrr",
+                  pending: false,
                 },
                 {
                   title: "New Sales",
@@ -341,6 +350,7 @@ export default function Dashboard() {
                   format: "number" as const,
                   icon: <Package className="h-4 w-4" />,
                   metricKey: "sales_count",
+                  pending: pendingTodayByMetric.sales_count ?? false,
                 },
               ]).map((card) => {
                 const { ranking, label } = getTodayRanking(card.metricKey);
@@ -353,6 +363,9 @@ export default function Dashboard() {
                     format={card.format}
                     currency={card.format === "currency" ? todayTotals.currency : undefined}
                     icon={card.icon}
+                    pending={card.pending}
+                    pendingSourceIds={pendingSourceIdsByMetric[card.metricKey]}
+                    pendingSources={pendingSourcesByMetric[card.metricKey]}
                     description="yesterday"
                     ranking={ranking}
                     rankingLabel={label}
@@ -403,6 +416,10 @@ export default function Dashboard() {
                 isStockMetric && !canCompare
                   ? "Comparison unavailable — snapshot coverage is incomplete."
                   : undefined;
+              const pending =
+                card.metricKey === "net_revenue"
+                  ? (pendingRangeByMetric.revenue ?? false) || (pendingRangeByMetric.platform_fees ?? false)
+                  : (pendingRangeByMetric[card.metricKey] ?? false);
               return (
                 <MetricCard
                   key={card.metricKey}
@@ -412,6 +429,9 @@ export default function Dashboard() {
                   format={card.format}
                   currency={card.format === "currency" ? currency : undefined}
                   icon={card.icon}
+                  pending={pending}
+                  pendingSourceIds={pendingSourceIdsByMetric[card.metricKey]}
+                  pendingSources={pendingSourcesByMetric[card.metricKey]}
                   ranking={ranking}
                   rankingLabel={label}
                   description={
@@ -433,6 +453,7 @@ export default function Dashboard() {
                   chartData={metricsByDay[card.metricKey]}
                   chartId={card.metricKey}
                   breakdownByDate={breakdownByMetricAndDay[card.metricKey]}
+                  pendingByDate={pendingByMetricAndDay[card.metricKey]}
                   loading={metricsLoading}
                   subtitle={"subtitle" in card ? (card as any).subtitle : undefined}
                 />
