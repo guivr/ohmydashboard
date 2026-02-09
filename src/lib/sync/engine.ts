@@ -370,6 +370,7 @@ function storeMetrics(
     for (const metric of newMetrics) {
       const resolvedProjectId = metric.projectId || null;
       const metadataJson = JSON.stringify(metric.metadata || {});
+      const isPendingMetric = metric.metadata?.pending === "true";
 
       // Build dedup conditions — projectId and metadata are part of the key.
       // Including metadata ensures metrics sub-keyed by metadata fields
@@ -385,6 +386,22 @@ function storeMetrics(
         conditions.push(isNull(metrics.projectId));
       }
       conditions.push(eq(metrics.metadata, metadataJson));
+
+      if (isPendingMetric) {
+        const pendingDeleteConditions = [
+          eq(metrics.accountId, accountId),
+          eq(metrics.metricType, metric.metricType),
+          eq(metrics.date, metric.date),
+        ];
+        if (resolvedProjectId) {
+          pendingDeleteConditions.push(eq(metrics.projectId, resolvedProjectId));
+        } else {
+          pendingDeleteConditions.push(isNull(metrics.projectId));
+        }
+        tx.delete(metrics)
+          .where(and(...pendingDeleteConditions))
+          .run();
+      }
 
       const existing = tx
         .select({ id: metrics.id })

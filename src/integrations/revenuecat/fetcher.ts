@@ -240,6 +240,7 @@ function normalizeChartData(
   endDate: Date
 ): NormalizedMetric[] {
   const metricsByDate = new Map<string, NormalizedMetric>();
+  const incompleteDates = new Set<string>();
 
   if (!chartData.values || chartData.values.length === 0) {
     return [];
@@ -282,14 +283,6 @@ function normalizeChartData(
       continue;
     }
 
-    // Skip incomplete zero values — RevenueCat marks data points as
-    // "incomplete" when realtime aggregation hasn't finished yet. A zero
-    // from an incomplete period means "not computed yet", not "$0 revenue".
-    // Storing it would overwrite the correct value from the previous sync.
-    if (incomplete && value === 0 && !STOCK_METRIC_KEYS.has(internalMetricKey)) {
-      continue;
-    }
-
     // RevenueCat may return timestamps in seconds (v2) or milliseconds (v3).
     const normalizedTimestamp =
       timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp;
@@ -300,6 +293,15 @@ function normalizeChartData(
     // corrupt timestamps while allowing realtime data for today.
     const bufferEnd = addDays(endDate, 1);
     if (date.getFullYear() < 2000 || date > bufferEnd) {
+      continue;
+    }
+
+    // Skip incomplete zero values — RevenueCat marks data points as
+    // "incomplete" when realtime aggregation hasn't finished yet. A zero
+    // from an incomplete period means "not computed yet", not "$0 revenue".
+    // Storing it would overwrite the correct value from the previous sync.
+    if (incomplete && value === 0 && !STOCK_METRIC_KEYS.has(internalMetricKey)) {
+      incompleteDates.add(format(date, "yyyy-MM-dd"));
       continue;
     }
 
@@ -324,7 +326,7 @@ function normalizeChartData(
 
     while (cursor.getTime() <= endTime) {
       const dateKey = format(cursor, "yyyy-MM-dd");
-      if (!metricsByDate.has(dateKey)) {
+      if (!metricsByDate.has(dateKey) && !incompleteDates.has(dateKey)) {
         metricsByDate.set(dateKey, {
           metricType: internalMetricKey,
           value: 0,
@@ -333,6 +335,18 @@ function normalizeChartData(
         });
       }
       cursor = addDays(cursor, 1);
+    }
+  }
+
+  if (!STOCK_METRIC_KEYS.has(internalMetricKey) && incompleteDates.size > 0) {
+    for (const date of incompleteDates) {
+      metricsByDate.set(`${date}__pending`, {
+        metricType: internalMetricKey,
+        value: 0,
+        date,
+        currency: chartData.yaxis_currency,
+        metadata: { pending: "true" },
+      });
     }
   }
 
@@ -358,6 +372,7 @@ function extractSecondaryMeasure(
   endDate: Date
 ): NormalizedMetric[] {
   const metricsByDate = new Map<string, NormalizedMetric>();
+  const incompleteDates = new Set<string>();
 
   if (!chartData.values || chartData.values.length === 0) {
     return [];
@@ -379,7 +394,16 @@ function extractSecondaryMeasure(
     if (value === null || value === undefined) continue;
 
     const incomplete = v3.incomplete === true;
-    if (incomplete && value === 0) continue;
+    if (incomplete && value === 0) {
+      const normalizedTimestamp =
+        v3.cohort < 1_000_000_000_000 ? v3.cohort * 1000 : v3.cohort;
+      const date = new Date(normalizedTimestamp);
+      const bufferEnd = addDays(endDate, 1);
+      if (date.getFullYear() >= 2000 && date <= bufferEnd) {
+        incompleteDates.add(format(date, "yyyy-MM-dd"));
+      }
+      continue;
+    }
 
     const normalizedTimestamp =
       v3.cohort < 1_000_000_000_000 ? v3.cohort * 1000 : v3.cohort;
@@ -401,7 +425,7 @@ function extractSecondaryMeasure(
   const endTime = endDate.getTime();
   while (cursor.getTime() <= endTime) {
     const dateKey = format(cursor, "yyyy-MM-dd");
-    if (!metricsByDate.has(dateKey)) {
+    if (!metricsByDate.has(dateKey) && !incompleteDates.has(dateKey)) {
       metricsByDate.set(dateKey, {
         metricType: outputMetricKey,
         value: 0,
@@ -409,6 +433,17 @@ function extractSecondaryMeasure(
       });
     }
     cursor = addDays(cursor, 1);
+  }
+
+  if (incompleteDates.size > 0) {
+    for (const date of incompleteDates) {
+      metricsByDate.set(`${date}__pending`, {
+        metricType: outputMetricKey,
+        value: 0,
+        date,
+        metadata: { pending: "true" },
+      });
+    }
   }
 
   return Array.from(metricsByDate.values()).sort((a, b) =>
