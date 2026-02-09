@@ -20,13 +20,18 @@ import {
   type MetricsResponse,
   type AggregatedMetric,
   type ProductMetricsResponse,
-  type ProjectGroupResponse,
   type CustomersByCountryResponse,
 } from "./use-metrics";
 import type { RankingEntry } from "@/components/dashboard/metric-card";
 import { apiPost } from "@/lib/api-client";
 import { formatCurrency } from "@/lib/format";
 import { shouldStartBackfill, shouldStartRangeBackfill } from "./compare-backfill";
+import { applyProjectGroupMerging, buildGroupLookup, type GroupLookup } from "./dashboard/group-merge";
+import { buildBreakdownByMetricAndDay } from "./dashboard/breakdowns";
+import { useDailyTotalsSnapshots } from "./dashboard/use-daily-totals-snapshots";
+import { usePendingFlags } from "./dashboard/use-pending-flags";
+import { extractTotals, type DashboardTotals } from "./dashboard/metrics-totals";
+import { buildSourceId, parseSourceId } from "./dashboard/source-ids";
 
 // ─── Date windows ─────────────────────────────────────────────────────────────
 
@@ -114,19 +119,6 @@ export interface IntegrationInfo {
   accounts: AccountInfo[];
 }
 
-export interface DashboardTotals {
-  revenue: number;
-  mrr: number;
-  netRevenue: number;
-  activeSubscriptions: number;
-  newCustomers: number;
-  subscriptionRevenue: number;
-  oneTimeRevenue: number;
-  salesCount: number;
-  platformFees: number;
-  currency: string;
-}
-
 export interface DashboardData {
   // Loading states
   loading: boolean;
@@ -173,7 +165,23 @@ export interface DashboardData {
    */
   breakdownByMetricAndDay: Record<
     string,
-    Record<string, Array<{ label: string; value: number; integrationName?: string; integrationNames?: string[] }>>
+    Record<
+      string,
+      Array<{
+        label: string;
+        value: number;
+        integrationName?: string;
+        integrationNames?: string[];
+        sourceId?: string;
+        pending?: boolean;
+      }>
+    >
+  >;
+  pendingByMetricAndDay: Record<string, Record<string, boolean>>;
+  pendingSourceIdsByMetric: Record<string, Record<string, boolean>>;
+  pendingSourcesByMetric: Record<
+    string,
+    Array<{ sourceId: string; label: string; integrationName?: string }>
   >;
 
   // Rankings
@@ -183,9 +191,13 @@ export interface DashboardData {
   // Today section
   todayTotals: DashboardTotals;
   yesterdayTotals: DashboardTotals;
+  dayBeforeTotals: DashboardTotals;
   todayNewMrr: number;
+  yesterdayNewMrr: number;
   todayBlendedRankings: Record<string, RankingEntry[]>;
   todayLoading: boolean;
+  pendingTodayByMetric: Record<string, boolean>;
+  pendingRangeByMetric: Record<string, boolean>;
 
   // Customers by country
   customersByCountry: CustomersByCountryResponse;
@@ -197,25 +209,6 @@ export interface DashboardData {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function extractTotals(data: MetricsResponse | AggregatedMetric[] | null): DashboardTotals {
-  const totals = Array.isArray(data) ? data : [];
-  const get = (key: string) => totals.find((t: any) => t.metricType === key)?.total || 0;
-  const getCurrency = (key: string) => totals.find((t: any) => t.metricType === key)?.currency || "USD";
-
-  return {
-    revenue: get("revenue"),
-    mrr: get("mrr"),
-    netRevenue: get("revenue") - get("platform_fees"),
-    activeSubscriptions: get("active_subscriptions"),
-    newCustomers: get("new_customers"),
-    subscriptionRevenue: get("subscription_revenue"),
-    oneTimeRevenue: get("one_time_revenue"),
-    salesCount: get("sales_count"),
-    platformFees: get("platform_fees"),
-    currency: getCurrency("revenue"),
-  };
-}
 
 function extractCounts(data: MetricsResponse | AggregatedMetric[] | null): Record<string, number> {
   const totals = Array.isArray(data) ? data : [];
@@ -335,7 +328,7 @@ function computeBlendedRankings(
   // Per metric type, product entries
   const productEntries = new Map<
     string,
-    Map<string, { value: number; name: string; integrationName: string; date: string }>
+    Map<string, { value: number; name: string; integrationName: string; date: string; accountId: string }>
   >(); // metricType -> projectId -> data
 
   for (const m of productMetrics) {
@@ -367,7 +360,7 @@ function computeBlendedRankings(
         existing.value += val;
       }
     } else {
-      projMap.set(pid, { value: val, name: productName, integrationName, date });
+      projMap.set(pid, { value: val, name: productName, integrationName, date, accountId: aid });
     }
   }
 
@@ -394,7 +387,7 @@ function computeBlendedRankings(
           label: data.name,
           integrationName: data.integrationName,
           value: data.value,
-          sourceId: projectId,
+          sourceId: buildSourceId(data.accountId, projectId),
         });
       }
     }
@@ -414,7 +407,7 @@ function computeBlendedRankings(
             })(),
             integrationName: accountIntegrationMap.get(accountId) ?? "Unknown",
             value: data.value,
-            sourceId: accountId,
+            sourceId: buildSourceId(accountId),
           });
         }
       }
@@ -437,310 +430,10 @@ function computeBlendedRankings(
   return { accountRankings, blendedRankings };
 }
 
-// ─── Project Group Merging ─────────────────────────────────────────────────────
-
-/**
- * Build a lookup from (accountId, projectId | null) -> groupId
- * and a map from groupId -> group info.
- */
-export interface GroupLookup {
-  /** (accountId:projectId) -> groupId */
-  memberToGroup: Map<string, string>;
-  /** groupId -> { name, integrationNames } */
-  groupInfo: Map<string, { name: string; integrationNames: string[] }>;
-}
-
-export function buildGroupLookup(
-  groups: ProjectGroupResponse[],
-  accountIntegrationMap: Map<string, string>
-): GroupLookup {
-  const memberToGroup = new Map<string, string>();
-  const groupInfo = new Map<string, { name: string; integrationNames: string[] }>();
-
-  for (const group of groups) {
-    const integrationNames = new Set<string>();
-    for (const member of group.members) {
-      const key = `${member.accountId}:${member.projectId ?? ""}`;
-      memberToGroup.set(key, group.id);
-      const integName = accountIntegrationMap.get(member.accountId);
-      if (integName) integrationNames.add(integName);
-    }
-    groupInfo.set(group.id, {
-      name: group.name,
-      integrationNames: Array.from(integrationNames),
-    });
-  }
-
-  return { memberToGroup, groupInfo };
-}
-
-/**
- * Post-process blended rankings to merge entries that belong to the same
- * project group. Merged entries use the group name as label, sum their
- * values, and combine integration names for stacked logos.
- *
- * Entries that don't belong to any group pass through unchanged.
- */
-export function applyProjectGroupMerging(
-  rankings: Record<string, RankingEntry[]>,
-  lookup: GroupLookup,
-  productMetricsData: ProductMetricsResponse | null,
-  accountLabels?: Record<string, string>
-): Record<string, RankingEntry[]> {
-  if (lookup.memberToGroup.size === 0) return rankings;
-
-  // Build a reverse lookup: label -> member keys (accountId:projectId)
-  // We need this because blended rankings use labels, not IDs.
-
-  // 1. Project labels -> keys
-  const labelToKeys = new Map<string, string[]>();
-  if (productMetricsData && "projects" in productMetricsData) {
-    for (const [projectId, info] of Object.entries(productMetricsData.projects)) {
-      const key = `${info.accountId}:${projectId}`;
-      const existing = labelToKeys.get(info.label) ?? [];
-      existing.push(key);
-      labelToKeys.set(info.label, existing);
-    }
-  }
-
-  // 2. Account labels -> keys (for account-level group members)
-  //    Also handle disambiguated labels like "Drawings Alive (Stripe)"
-  const accountLabelToKeys = new Map<string, string[]>();
-  if (accountLabels) {
-    for (const [accountId, label] of Object.entries(accountLabels)) {
-      const key = `${accountId}:`;
-      // Plain label
-      const existing = accountLabelToKeys.get(label) ?? [];
-      existing.push(key);
-      accountLabelToKeys.set(label, existing);
-    }
-  }
-
-  const result: Record<string, RankingEntry[]> = {};
-
-  for (const [metricType, entries] of Object.entries(rankings)) {
-    const groupBuckets = new Map<string, { value: number; integrationNames: Set<string>; members: RankingEntry[] }>();
-    const ungrouped: RankingEntry[] = [];
-
-    for (const entry of entries) {
-      // Try to find the group for this entry
-      let groupId: string | undefined;
-
-      // Check by label -> projectId mapping
-      const keys = labelToKeys.get(entry.label);
-      if (keys) {
-        for (const key of keys) {
-          const gid = lookup.memberToGroup.get(key);
-          if (gid) {
-            groupId = gid;
-            break;
-          }
-        }
-      }
-
-      // Check account-level: match label against account labels
-      if (!groupId) {
-        const accKeys = accountLabelToKeys.get(entry.label);
-        if (accKeys) {
-          for (const key of accKeys) {
-            const gid = lookup.memberToGroup.get(key);
-            if (gid) {
-              groupId = gid;
-              break;
-            }
-          }
-        }
-      }
-
-      // Handle disambiguated labels like "Drawings Alive (Stripe)"
-      // Strip the integration suffix and try again
-      if (!groupId) {
-        const suffixMatch = entry.label.match(/^(.+?)\s*\([^)]+\)$/);
-        if (suffixMatch) {
-          const baseLabel = suffixMatch[1];
-          // Try project labels
-          const projKeys = labelToKeys.get(baseLabel);
-          if (projKeys) {
-            for (const key of projKeys) {
-              const gid = lookup.memberToGroup.get(key);
-              if (gid) { groupId = gid; break; }
-            }
-          }
-          // Try account labels
-          if (!groupId) {
-            const accKeys = accountLabelToKeys.get(baseLabel);
-            if (accKeys) {
-              for (const key of accKeys) {
-                const gid = lookup.memberToGroup.get(key);
-                if (gid) { groupId = gid; break; }
-              }
-            }
-          }
-        }
-      }
-
-      if (groupId) {
-        const bucket = groupBuckets.get(groupId) ?? { value: 0, integrationNames: new Set<string>(), members: [] as RankingEntry[] };
-        bucket.value += entry.value;
-        bucket.members.push(entry);
-        if (entry.integrationNames) {
-          for (const n of entry.integrationNames) bucket.integrationNames.add(n);
-        } else {
-          bucket.integrationNames.add(entry.integrationName);
-        }
-        groupBuckets.set(groupId, bucket);
-      } else {
-        ungrouped.push(entry);
-      }
-    }
-
-    // Build group entries with children
-    const groupEntries: RankingEntry[] = [];
-    for (const [groupId, bucket] of groupBuckets) {
-      const info = lookup.groupInfo.get(groupId);
-      if (!info) continue;
-      const names = Array.from(bucket.integrationNames);
-      // Build children with percentages relative to the group total
-      const children = bucket.members
-        .sort((a, b) => b.value - a.value)
-        .map((m) => ({
-          ...m,
-          percentage: bucket.value > 0 ? (m.value / bucket.value) * 100 : 0,
-        }));
-      groupEntries.push({
-        label: info.name,
-        integrationName: names[0] ?? "Unknown",
-        integrationNames: names,
-        value: bucket.value,
-        percentage: 0, // recalculated below
-        children: children.length > 1 ? children : undefined,
-      });
-    }
-
-    // Merge and recalculate percentages
-    const merged = [...groupEntries, ...ungrouped];
-    merged.sort((a, b) => b.value - a.value);
-    const total = merged.reduce((sum, e) => sum + e.value, 0);
-    for (const entry of merged) {
-      entry.percentage = total > 0 ? (entry.value / total) * 100 : 0;
-    }
-
-    result[metricType] = merged;
-  }
-
-  return result;
-}
-
 /**
  * Merge daily breakdown entries (top-5 per day) using project group info.
  * Similar to applyProjectGroupMerging but operates on a flat array for a single date.
  */
-function mergeBreakdownEntries(
-  entries: Array<{ label: string; value: number; integrationName?: string }>,
-  lookup: GroupLookup,
-  productMetricsData: ProductMetricsResponse | null,
-  accountLabels?: Record<string, string>
-): Array<{ label: string; value: number; integrationName?: string; integrationNames?: string[] }> {
-  // Build same reverse lookups as in applyProjectGroupMerging
-  const labelToKeys = new Map<string, string[]>();
-  if (productMetricsData && "projects" in productMetricsData) {
-    for (const [projectId, info] of Object.entries(productMetricsData.projects)) {
-      const key = `${info.accountId}:${projectId}`;
-      const existing = labelToKeys.get(info.label) ?? [];
-      existing.push(key);
-      labelToKeys.set(info.label, existing);
-    }
-  }
-
-  const accountLabelToKeys = new Map<string, string[]>();
-  if (accountLabels) {
-    for (const [accountId, label] of Object.entries(accountLabels)) {
-      const key = `${accountId}:`;
-      const existing = accountLabelToKeys.get(label) ?? [];
-      existing.push(key);
-      accountLabelToKeys.set(label, existing);
-    }
-  }
-
-  const groupBuckets = new Map<string, { value: number; integrationNames: Set<string> }>();
-  const ungrouped: Array<{ label: string; value: number; integrationName?: string }> = [];
-
-  for (const entry of entries) {
-    let groupId: string | undefined;
-
-    // Try project labels
-    const projKeys = labelToKeys.get(entry.label);
-    if (projKeys) {
-      for (const key of projKeys) {
-        const gid = lookup.memberToGroup.get(key);
-        if (gid) { groupId = gid; break; }
-      }
-    }
-
-    // Try account labels
-    if (!groupId) {
-      const accKeys = accountLabelToKeys.get(entry.label);
-      if (accKeys) {
-        for (const key of accKeys) {
-          const gid = lookup.memberToGroup.get(key);
-          if (gid) { groupId = gid; break; }
-        }
-      }
-    }
-
-    // Try disambiguated labels
-    if (!groupId) {
-      const suffixMatch = entry.label.match(/^(.+?)\s*\([^)]+\)$/);
-      if (suffixMatch) {
-        const baseLabel = suffixMatch[1];
-        const pKeys = labelToKeys.get(baseLabel);
-        if (pKeys) {
-          for (const key of pKeys) {
-            const gid = lookup.memberToGroup.get(key);
-            if (gid) { groupId = gid; break; }
-          }
-        }
-        if (!groupId) {
-          const aKeys = accountLabelToKeys.get(baseLabel);
-          if (aKeys) {
-            for (const key of aKeys) {
-              const gid = lookup.memberToGroup.get(key);
-              if (gid) { groupId = gid; break; }
-            }
-          }
-        }
-      }
-    }
-
-    if (groupId) {
-      const bucket = groupBuckets.get(groupId) ?? { value: 0, integrationNames: new Set() };
-      bucket.value += entry.value;
-      if (entry.integrationName) bucket.integrationNames.add(entry.integrationName);
-      groupBuckets.set(groupId, bucket);
-    } else {
-      ungrouped.push(entry);
-    }
-  }
-
-  const merged: Array<{ label: string; value: number; integrationName?: string; integrationNames?: string[] }> = [];
-
-  for (const [groupId, bucket] of groupBuckets) {
-    const info = lookup.groupInfo.get(groupId);
-    if (!info) continue;
-    const names = Array.from(bucket.integrationNames);
-    merged.push({
-      label: info.name,
-      integrationName: names[0],
-      integrationNames: names.length > 1 ? names : undefined,
-      value: bucket.value,
-    });
-  }
-
-  merged.push(...ungrouped);
-  merged.sort((a, b) => b.value - a.value);
-  return merged.slice(0, 5);
-}
-
 // ─── Main Hook ────────────────────────────────────────────────────────────────
 
 export function useDashboardData(): DashboardData {
@@ -859,6 +552,7 @@ export function useDashboardData(): DashboardData {
   // ─── Today metrics (always fetches today regardless of date filter) ──────
   const todayDate = useMemo(() => format(new Date(), "yyyy-MM-dd"), []);
   const yesterdayDate = useMemo(() => format(subDays(new Date(), 1), "yyyy-MM-dd"), []);
+  const dayBeforeDate = useMemo(() => format(subDays(new Date(), 2), "yyyy-MM-dd"), []);
 
   const { data: todayMetricsData, loading: todayMetricsLoading, refetch: refetchTodayMetrics } =
     useMetrics({
@@ -867,26 +561,26 @@ export function useDashboardData(): DashboardData {
       accountIds: effectiveAccountIds,
     });
 
-  const { data: todayTotalsData, refetch: refetchTodayTotals } =
-    useMetrics({
-      from: todayDate,
-      to: todayDate,
-      aggregation: "total",
-      accountIds: effectiveAccountIds,
-    });
+  const {
+    todayTotals,
+    yesterdayTotals,
+    dayBeforeTotals,
+    todayNewMrr,
+    yesterdayNewMrr,
+    refetchTodayTotals,
+    refetchYesterdayTotals,
+    refetchDayBeforeTotals,
+  } = useDailyTotalsSnapshots({
+    accountIds: effectiveAccountIds,
+    todayDate,
+    yesterdayDate,
+    dayBeforeDate,
+  });
 
   const { data: todayProductMetricsData, refetch: refetchTodayProductMetrics } =
     useProductMetrics({
       from: todayDate,
       to: todayDate,
-      accountIds: effectiveAccountIds,
-    });
-
-  const { data: yesterdayTotalsData, refetch: refetchYesterdayTotals } =
-    useMetrics({
-      from: yesterdayDate,
-      to: yesterdayDate,
-      aggregation: "total",
       accountIds: effectiveAccountIds,
     });
 
@@ -1278,10 +972,6 @@ export function useDashboardData(): DashboardData {
     [todayMetricsData]
   );
 
-  const todayTotals = useMemo(() => extractTotals(todayTotalsData), [todayTotalsData]);
-  const yesterdayTotals = useMemo(() => extractTotals(yesterdayTotalsData), [yesterdayTotalsData]);
-  const todayNewMrr = todayTotals.mrr - yesterdayTotals.mrr;
-
   const resolvedTodayProductData = useMemo(
     () =>
       todayProductMetricsData && "metrics" in todayProductMetricsData
@@ -1319,6 +1009,115 @@ export function useDashboardData(): DashboardData {
         : null,
     [yesterdayProductMetricsData]
   );
+
+  const {
+    pendingTodayByMetric,
+    pendingRangeByMetric,
+    pendingByMetricAndDay,
+    pendingSourceIdsByMetricAndDay,
+  } = usePendingFlags({
+    dailyMetrics,
+    productMetrics: resolvedProductData?.metrics ?? [],
+    todayDailyMetrics,
+    todayProductMetrics: resolvedTodayProductData?.metrics ?? [],
+    yesterdayDailyMetrics,
+    yesterdayProductMetrics: resolvedYesterdayProductData?.metrics ?? [],
+    todayDate,
+    yesterdayDate,
+    rangeTo: to,
+    flowMetricKeys: FLOW_METRIC_KEYS,
+  });
+
+  const pendingByMetricAndDayWithNet = useMemo(() => {
+    const result: Record<string, Record<string, boolean>> = { ...pendingByMetricAndDay };
+    const revenueDates = pendingByMetricAndDay.revenue ?? {};
+    const feeDates = pendingByMetricAndDay.platform_fees ?? {};
+    const netDates = new Set<string>([
+      ...Object.keys(revenueDates),
+      ...Object.keys(feeDates),
+    ]);
+    if (netDates.size > 0) {
+      const net: Record<string, boolean> = {};
+      for (const date of netDates) {
+        net[date] = true;
+      }
+      result.net_revenue = net;
+    }
+    return result;
+  }, [pendingByMetricAndDay]);
+
+  const pendingSourceIdsByMetric = useMemo(() => {
+    const result: Record<string, Record<string, boolean>> = {};
+    for (const [metricType, byDate] of Object.entries(pendingSourceIdsByMetricAndDay)) {
+      const dates = Object.keys(byDate);
+      if (dates.length === 0) continue;
+      const latestDate = dates.sort((a, b) => b.localeCompare(a))[0];
+      const sourcesForLatest = byDate[latestDate];
+      if (sourcesForLatest) {
+        result[metricType] = { ...sourcesForLatest };
+      }
+    }
+
+    const revenueDates = Object.keys(pendingSourceIdsByMetricAndDay.revenue ?? {});
+    const feeDates = Object.keys(pendingSourceIdsByMetricAndDay.platform_fees ?? {});
+    const latestRevenueDate = revenueDates.sort((a, b) => b.localeCompare(a))[0];
+    const latestFeeDate = feeDates.sort((a, b) => b.localeCompare(a))[0];
+    const revenueSources = latestRevenueDate
+      ? pendingSourceIdsByMetricAndDay.revenue?.[latestRevenueDate] ?? {}
+      : {};
+    const feeSources = latestFeeDate
+      ? pendingSourceIdsByMetricAndDay.platform_fees?.[latestFeeDate] ?? {}
+      : {};
+    const netSources: Record<string, boolean> = { ...revenueSources, ...feeSources };
+    if (Object.keys(netSources).length > 0) {
+      result.net_revenue = netSources;
+    }
+
+    return result;
+  }, [pendingSourceIdsByMetricAndDay]);
+
+  const pendingSourcesByMetric = useMemo(() => {
+    const result: Record<string, Array<{ sourceId: string; label: string; integrationName?: string }>> = {};
+    const projectMap =
+      resolvedTodayProductData?.projects ?? resolvedProductData?.projects ?? {};
+    const accountLabelMap = {
+      ...accountLabels,
+      ...todayAccountLabels,
+      ...yesterdayAccountLabels,
+    };
+
+    for (const [metricType, sources] of Object.entries(pendingSourceIdsByMetric)) {
+      const list: Array<{ sourceId: string; label: string; integrationName?: string }> = [];
+      for (const sourceId of Object.keys(sources)) {
+        const { accountId, projectId } = parseSourceId(sourceId);
+        if (projectId && projectMap[projectId]) {
+          const projectInfo = projectMap[projectId];
+          list.push({
+            sourceId,
+            label: projectInfo.label,
+            integrationName: accountIntegrationMap.get(projectInfo.accountId),
+          });
+        } else {
+          list.push({
+            sourceId,
+            label: accountLabelMap[accountId] ?? accountId.slice(0, 8),
+            integrationName: accountIntegrationMap.get(accountId),
+          });
+        }
+      }
+      if (list.length > 0) result[metricType] = list;
+    }
+
+    return result;
+  }, [
+    pendingSourceIdsByMetric,
+    resolvedTodayProductData,
+    resolvedProductData,
+    accountLabels,
+    todayAccountLabels,
+    yesterdayAccountLabels,
+    accountIntegrationMap,
+  ]);
 
   const { blendedRankings: rawYesterdayBlendedRankings } = useMemo(
     () =>
@@ -1447,199 +1246,27 @@ export function useDashboardData(): DashboardData {
   }, [dailyMetrics]);
 
   // ─── Per-metric-type daily breakdowns (for chart tooltips) ───────────
-  const breakdownByMetricAndDay = useMemo(() => {
-    const projectLabelsMap = resolvedProductData?.projects ?? {};
-    const hasProjectFilter = enabledProjectIds.size > 0;
-    const productMetrics = resolvedProductData?.metrics ?? [];
-
-    // For each metric type, track which accounts have product-level data
-    const accountsWithProducts = new Map<string, Set<string>>();
-
-    // 1) Product-level data: metricType -> date -> projectId -> { value, integrationName }
-    const productByTypeDate = new Map<
-      string,
-      Map<string, Map<string, { value: number; integrationName?: string }>>
-    >();
-
-    for (const m of productMetrics) {
-      if (!m.projectId) continue;
-      if (hasProjectFilter && !enabledProjectIds.has(m.projectId)) continue;
-
-      const mt = m.metricType;
-      if (!accountsWithProducts.has(mt)) accountsWithProducts.set(mt, new Set());
-      accountsWithProducts.get(mt)!.add(m.accountId);
-
-      if (!productByTypeDate.has(mt)) productByTypeDate.set(mt, new Map());
-      const dateMap = productByTypeDate.get(mt)!;
-      if (!dateMap.has(m.date)) dateMap.set(m.date, new Map());
-      const projMap = dateMap.get(m.date)!;
-      const existing = projMap.get(m.projectId);
-      if (existing) {
-        // For stock metrics we only want the latest value, but since we're per-date
-        // already, sum is fine (multiple entries same date = same snapshot typically)
-        existing.value += m.value;
-      } else {
-        projMap.set(m.projectId, {
-          value: m.value,
-          integrationName: accountIntegrationMap.get(m.accountId),
-        });
-      }
-    }
-
-    // 2) Account-level data: metricType -> date -> accountId -> { value, integrationName }
-    const accountByTypeDate = new Map<
-      string,
-      Map<string, Map<string, { value: number; integrationName?: string }>>
-    >();
-
-    for (const m of dailyMetrics) {
-      const mt = m.metricType as string;
-      const aid = m.accountId as string;
-      const accsWithProds = accountsWithProducts.get(mt);
-      if (accsWithProds?.has(aid)) continue; // skip if we have product-level for this
-
-      if (!accountByTypeDate.has(mt)) accountByTypeDate.set(mt, new Map());
-      const dateMap = accountByTypeDate.get(mt)!;
-      if (!dateMap.has(m.date)) dateMap.set(m.date, new Map());
-      const accMap = dateMap.get(m.date)!;
-      const existing = accMap.get(aid);
-      if (existing) {
-        existing.value += m.value;
-      } else {
-        accMap.set(aid, {
-          value: m.value,
-          integrationName: accountIntegrationMap.get(aid),
-        });
-      }
-    }
-
-    // 3) Build result: metricType -> date -> top-5 entries
-    const allMetricTypes = new Set([
-      ...productByTypeDate.keys(),
-      ...accountByTypeDate.keys(),
-    ]);
-
-    const result: Record<
-      string,
-      Record<string, Array<{ label: string; value: number; integrationName?: string; integrationNames?: string[] }>>
-    > = {};
-
-    for (const mt of allMetricTypes) {
-      const prodDates = productByTypeDate.get(mt);
-      const accDates = accountByTypeDate.get(mt);
-      const allDates = new Set<string>([
-        ...(prodDates?.keys() ?? []),
-        ...(accDates?.keys() ?? []),
-      ]);
-
-      const dateResult: Record<string, Array<{ label: string; value: number; integrationName?: string; integrationNames?: string[] }>> = {};
-
-      for (const date of allDates) {
-        const entries: Array<{ label: string; value: number; integrationName?: string }> = [];
-
-        const prodMap = prodDates?.get(date);
-        if (prodMap) {
-          for (const [projectId, data] of prodMap) {
-            entries.push({
-              label: projectLabelsMap[projectId]?.label ?? projectId.slice(0, 8),
-              value: data.value,
-              integrationName: data.integrationName,
-            });
-          }
-        }
-
-        const accMap = accDates?.get(date);
-        if (accMap) {
-          for (const [accId, data] of accMap) {
-            entries.push({
-              label: accountLabels[accId] ?? accId.slice(0, 8),
-              value: data.value,
-              integrationName: data.integrationName,
-            });
-          }
-        }
-
-        // Disambiguate duplicate labels
-        const labelCounts = new Map<string, number>();
-        for (const entry of entries) {
-          labelCounts.set(entry.label, (labelCounts.get(entry.label) ?? 0) + 1);
-        }
-        const disambiguated = entries.map((entry) => {
-          if ((labelCounts.get(entry.label) ?? 0) <= 1) return entry;
-          const suffix = entry.integrationName ? ` (${entry.integrationName})` : "";
-          return { ...entry, label: `${entry.label}${suffix}` };
-        });
-
-        const top = disambiguated.sort((a, b) => b.value - a.value).slice(0, 5);
-        if (top.length > 0) {
-          // Apply project group merging to daily breakdown entries
-          if (groupLookup.memberToGroup.size > 0) {
-            dateResult[date] = mergeBreakdownEntries(top, groupLookup, resolvedProductData, accountLabels);
-          } else {
-            dateResult[date] = top;
-          }
-        }
-      }
-
-      result[mt] = dateResult;
-    }
-
-    // 4) Derived breakdown for net revenue (revenue - platform fees)
-    const revenueBreakdown = result.revenue ?? {};
-    const feeBreakdown = result.platform_fees ?? {};
-    const netDates = new Set<string>([
-      ...Object.keys(revenueBreakdown),
-      ...Object.keys(feeBreakdown),
-    ]);
-    if (netDates.size > 0) {
-      const netByDate: Record<
-        string,
-        Array<{ label: string; value: number; integrationName?: string; integrationNames?: string[] }>
-      > = {};
-      for (const date of netDates) {
-        const merged = new Map<
-          string,
-          { label: string; value: number; integrationName?: string; integrationNames?: string[] }
-        >();
-
-        const applyEntry = (
-          entry: { label: string; value: number; integrationName?: string; integrationNames?: string[] },
-          sign: 1 | -1
-        ) => {
-          const existing = merged.get(entry.label) ?? {
-            label: entry.label,
-            value: 0,
-            integrationName: entry.integrationName,
-            integrationNames: entry.integrationNames,
-          };
-          if (!existing.integrationName && entry.integrationName) {
-            existing.integrationName = entry.integrationName;
-          }
-          if (!existing.integrationNames && entry.integrationNames) {
-            existing.integrationNames = entry.integrationNames;
-          }
-          existing.value += sign * entry.value;
-          merged.set(entry.label, existing);
-        };
-
-        for (const entry of revenueBreakdown[date] ?? []) applyEntry(entry, 1);
-        for (const entry of feeBreakdown[date] ?? []) applyEntry(entry, -1);
-
-        const netTop = Array.from(merged.values())
-          .filter((entry) => entry.value !== 0)
-          .sort((a, b) => b.value - a.value)
-          .slice(0, 5);
-        if (netTop.length > 0) {
-          netByDate[date] = netTop;
-        }
-      }
-      if (Object.keys(netByDate).length > 0) {
-        result.net_revenue = netByDate;
-      }
-    }
-
-    return result;
-  }, [resolvedProductData, enabledProjectIds, dailyMetrics, accountLabels, accountIntegrationMap, groupLookup]);
+  const breakdownByMetricAndDay = useMemo(
+    () =>
+      buildBreakdownByMetricAndDay({
+        resolvedProductData,
+        enabledProjectIds,
+        dailyMetrics,
+        accountLabels,
+        accountIntegrationMap,
+        groupLookup,
+        pendingSourceIdsByMetricAndDay,
+      }),
+    [
+      resolvedProductData,
+      enabledProjectIds,
+      dailyMetrics,
+      accountLabels,
+      accountIntegrationMap,
+      groupLookup,
+      pendingSourceIdsByMetricAndDay,
+    ]
+  );
 
   const revenueBreakdownByDay = useMemo(() => {
     const projectLabels = resolvedProductData?.projects ?? {};
@@ -1869,15 +1496,22 @@ export function useDashboardData(): DashboardData {
     metricsByDay,
     revenueBreakdownByDay,
     breakdownByMetricAndDay,
+    pendingByMetricAndDay: pendingByMetricAndDayWithNet,
+    pendingSourceIdsByMetric,
+    pendingSourcesByMetric,
 
     accountRankings,
     blendedRankings,
 
     todayTotals,
     yesterdayTotals,
+    dayBeforeTotals,
     todayNewMrr,
+    yesterdayNewMrr,
     todayBlendedRankings,
     todayLoading: todayMetricsLoading,
+    pendingTodayByMetric,
+    pendingRangeByMetric,
 
     customersByCountry: customersByCountryData,
     customersByCountryLoading,

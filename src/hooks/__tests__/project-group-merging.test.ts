@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  buildGroupLookup,
-  applyProjectGroupMerging,
-  type GroupLookup,
-} from "../use-dashboard-data";
+import { buildGroupLookup, applyProjectGroupMerging, type GroupLookup } from "../dashboard/group-merge";
 import type { RankingEntry } from "@/components/dashboard/metric-card";
 import type {
   ProjectGroupResponse,
