@@ -74,8 +74,8 @@ export interface SyncStep {
   key: string;
   /** Human-readable label, e.g. "Fetch charges" */
   label: string;
-  /** Whether this step succeeded, failed, or was skipped */
-  status: "success" | "error" | "skipped";
+  /** Whether this step succeeded, failed, was skipped, or is still running */
+  status: "success" | "error" | "skipped" | "running";
   /** Number of records this step produced (optional) */
   recordCount?: number;
   /** How long this step took in milliseconds */

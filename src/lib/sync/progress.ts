@@ -41,7 +41,25 @@ export function startSyncProgress(accountId: string) {
 export function appendSyncStep(accountId: string, step: SyncStep) {
   const current = progressByAccount.get(accountId);
   if (!current) return;
-  current.steps = [...current.steps, step];
+  const existingIndex = current.steps.findIndex((s) => s.key === step.key);
+  if (existingIndex >= 0) {
+    // Update existing step in-place (e.g. "running" -> "success")
+    current.steps = current.steps.map((s, i) =>
+      i === existingIndex ? step : s
+    );
+  } else {
+    current.steps = [...current.steps, step];
+  }
+  progressByAccount.set(accountId, current);
+  scheduleCleanup(accountId);
+}
+
+export function updateSyncStep(accountId: string, key: string, update: Partial<SyncStep>) {
+  const current = progressByAccount.get(accountId);
+  if (!current) return;
+  current.steps = current.steps.map((s) =>
+    s.key === key ? { ...s, ...update } : s
+  );
   progressByAccount.set(accountId, current);
   scheduleCleanup(accountId);
 }

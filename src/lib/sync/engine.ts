@@ -9,6 +9,7 @@ import { decrypt, isEncrypted } from "../crypto";
 import { generateSecureId, sanitizeErrorMessage } from "../security";
 import {
   appendSyncStep,
+  updateSyncStep,
   finalizeSyncProgress,
   startSyncProgress,
 } from "./progress";
@@ -190,7 +191,6 @@ export async function syncAccount(
         since,
         (step) => appendSyncStep(accountId, step)
       );
-
       if (!result.success) {
         const safeError = result.error
           ? sanitizeErrorMessage(result.error)
@@ -214,7 +214,6 @@ export async function syncAccount(
           recordsProcessed: 0,
           error: safeError,
           completedAt,
-          steps: result.steps,
         });
 
         return {
@@ -229,7 +228,18 @@ export async function syncAccount(
 
       // Store normalized metrics
       if (result.metrics.length > 0) {
-        storeMetrics(database, accountId, result.metrics);
+        appendSyncStep(accountId, {
+          key: "store_metrics",
+          label: "Store metrics",
+          status: "running",
+          recordCount: result.metrics.length,
+        });
+        const storeT0 = Date.now();
+        await storeMetrics(database, accountId, result.metrics);
+        updateSyncStep(accountId, "store_metrics", {
+          status: "success",
+          durationMs: Date.now() - storeT0,
+        });
       }
 
       // Mark sync as successful
@@ -249,7 +259,6 @@ export async function syncAccount(
         success: true,
         recordsProcessed: result.recordsProcessed,
         completedAt,
-        steps: result.steps,
       });
 
       return {
@@ -353,21 +362,21 @@ function ensureProjects(
  * Performance: Uses prepared statements and a project cache to minimize
  * database round-trips. The dedup SELECT uses the idx_metrics_dedup index.
  */
-function storeMetrics(
+/**
+ * Process a batch of metrics inside a single transaction.
+ */
+function storeMetricsBatch(
   db: Db,
   accountId: string,
-  newMetrics: NormalizedMetric[]
+  batch: NormalizedMetric[]
 ): void {
-  // Wrap all writes in a transaction so concurrent reads never see
-  // partially-written metrics (e.g. updated revenue for some products
-  // but stale values for others).
   db.transaction((tx) => {
     const now = new Date().toISOString();
 
     // Batch-ensure all referenced projects first (single pass)
-    ensureProjects(tx as unknown as Db, accountId, newMetrics);
+    ensureProjects(tx as unknown as Db, accountId, batch);
 
-    for (const metric of newMetrics) {
+    for (const metric of batch) {
       const resolvedProjectId = metric.projectId || null;
       const metadataJson = JSON.stringify(metric.metadata || {});
       const isPendingMetric = metric.metadata?.pending === "true";
@@ -446,6 +455,26 @@ function storeMetrics(
       }
     }
   });
+}
+
+const STORE_BATCH_SIZE = 100;
+
+/**
+ * Store normalized metrics in batched transactions, yielding to the event loop
+ * between batches so progress polling requests can be served.
+ */
+async function storeMetrics(
+  db: Db,
+  accountId: string,
+  newMetrics: NormalizedMetric[]
+): Promise<void> {
+  for (let i = 0; i < newMetrics.length; i += STORE_BATCH_SIZE) {
+    storeMetricsBatch(db, accountId, newMetrics.slice(i, i + STORE_BATCH_SIZE));
+    // Yield to the event loop so progress poll requests can be served
+    if (i + STORE_BATCH_SIZE < newMetrics.length) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
 }
 
 /**

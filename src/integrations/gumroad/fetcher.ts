@@ -792,6 +792,7 @@ export const gumroadFetcher: DataFetcher = {
     let products: GumroadProduct[] = [];
     let productLookup = new Map<string, GumroadProduct>();
     let t0 = Date.now();
+    reportStep?.({ key: "fetch_products", label: "Fetch products", status: "running" });
     try {
       products = await fetchProducts(accessToken);
       productLookup = buildProductLookup(products);
@@ -824,6 +825,7 @@ export const gumroadFetcher: DataFetcher = {
     // Step 2: Fetch sales (uses product lookup to classify subscription vs one-time)
     const productsWithSales = new Set<string>();
     t0 = Date.now();
+    reportStep?.({ key: "fetch_sales", label: "Fetch sales & revenue", status: "running" });
     try {
       const sales = await fetchSales(accessToken, syncSince);
       // Track which products had sales
@@ -867,6 +869,7 @@ export const gumroadFetcher: DataFetcher = {
 
     // Step 3: Fetch subscribers (only for membership products, per-product)
     t0 = Date.now();
+    reportStep?.({ key: "fetch_subscribers", label: "Fetch subscribers", status: "running" });
     try {
       const subscriptionProducts = products.filter(
         (p) =>

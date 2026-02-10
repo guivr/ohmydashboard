@@ -392,6 +392,7 @@ export default function Dashboard() {
                 },
               ]).map((card) => {
                 const { ranking, label } = getTodayRanking(card.metricKey);
+                const showBreakdown = !(card.metricKey === "revenue" && card.current === 0);
                 return (
                   <MetricCard
                     key={`today-${card.metricKey}`}
@@ -405,7 +406,7 @@ export default function Dashboard() {
                     pendingSourceIds={pendingSourceIdsByMetric[card.metricKey]}
                     pendingSources={pendingSourcesByMetric[card.metricKey]}
                     description="yesterday"
-                    ranking={ranking}
+                    ranking={showBreakdown ? ranking : undefined}
                     rankingLabel={label}
                     loading={todayLoading}
                     alwaysShowBreakdown

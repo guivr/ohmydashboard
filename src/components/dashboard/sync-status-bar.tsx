@@ -25,7 +25,7 @@ interface AccountToSync {
 interface SyncStepResult {
   key: string;
   label: string;
-  status: "success" | "error" | "skipped";
+  status: "success" | "error" | "skipped" | "running";
   recordCount?: number;
   durationMs?: number;
   error?: string;
@@ -809,6 +809,10 @@ function StepStatusIcon({
     case "success":
       return (
         <CheckCircle2 className="mt-0.5 h-3 w-3 shrink-0 text-emerald-500" />
+      );
+    case "running":
+      return (
+        <Loader2 className="mt-0.5 h-3 w-3 shrink-0 animate-spin text-muted-foreground/70" />
       );
     case "error":
       return (

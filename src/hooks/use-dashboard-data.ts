@@ -1160,8 +1160,17 @@ export function useDashboardData(): DashboardData {
   const todayBlendedRankings = useMemo(() => {
     const result = { ...todayBlendedRankingsBeforeDelta };
 
-    const todayMrrEntries = result.mrr ?? [];
+    const rawTodayMrrEntries = result.mrr ?? [];
     const yesterdayMrrEntries = yesterdayBlendedRankings.mrr ?? [];
+
+    // When today has no MRR data yet (new day, sync not complete), fall back to
+    // yesterday's entries as today's baseline.  MRR is a stock metric — the
+    // absence of a new snapshot means the value hasn't changed, NOT that every
+    // source churned to $0.
+    const todayMrrEntries =
+      rawTodayMrrEntries.length === 0 && yesterdayMrrEntries.length > 0
+        ? yesterdayMrrEntries
+        : rawTodayMrrEntries;
 
     // Build yesterday lookup by label
     const yesterdayByLabel = new Map<string, number>();

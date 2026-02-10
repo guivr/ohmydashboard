@@ -375,6 +375,7 @@ export const stripeFetcher: DataFetcher = {
     // Step 1: Fetch charges
     let charges: Stripe.Charge[] = [];
     let t0 = Date.now();
+    reportStep?.({ key: "fetch_charges", label: "Fetch charges & revenue", status: "running" });
     try {
       charges = await fetchCharges(stripe, syncSince);
       const revenueMetrics = computeDailyRevenue(charges);
@@ -405,6 +406,7 @@ export const stripeFetcher: DataFetcher = {
     // Step 2: Fetch subscriptions + compute MRR
     let subscriptions: Stripe.Subscription[] = [];
     t0 = Date.now();
+    reportStep?.({ key: "fetch_subscriptions", label: "Fetch subscriptions & MRR", status: "running" });
     try {
       subscriptions = await fetchActiveSubscriptions(stripe);
       const subscriptionMetrics = computeMRR(subscriptions, today);
@@ -434,6 +436,7 @@ export const stripeFetcher: DataFetcher = {
 
     // Step 3: Fetch customers
     t0 = Date.now();
+    reportStep?.({ key: "fetch_customers", label: "Fetch new customers", status: "running" });
     try {
       const customers = await fetchNewCustomers(stripe, syncSince);
       const customerMetrics = computeNewCustomers(customers, charges);

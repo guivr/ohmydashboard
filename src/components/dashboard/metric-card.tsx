@@ -237,7 +237,11 @@ export function MetricCard({
   const appearance = useAppearance();
   const lineColor = chartColor ?? resolved.chart;
 
-  // Fill in missing dates with zeros for a continuous time series
+  // Fill in missing dates for a continuous time series.
+  // For stock metrics (MRR, active subscriptions, etc.) carry the last known
+  // value forward — the absence of a data point means "unchanged", not zero.
+  // For flow metrics (revenue, sales, etc.) use zero — no data means nothing happened.
+  const isStock = calculation?.isStock ?? false;
   const filledChartData = useMemo(() => {
     if (!chartData || chartData.length === 0) return [];
     const sorted = [...chartData].sort((a, b) => a.date.localeCompare(b.date));
@@ -246,17 +250,21 @@ export function MetricCard({
     const dataByDate = new Map(sorted.map((d) => [d.date, d.value]));
     const result: Array<{ timestamp: number; value: number; date: string }> = [];
     const current = new Date(start);
+    let lastValue = 0;
     while (current <= end) {
       const dateStr = current.toISOString().split("T")[0];
+      const actual = dataByDate.get(dateStr);
+      const value = actual ?? (isStock ? lastValue : 0);
       result.push({
         timestamp: current.getTime(),
-        value: dataByDate.get(dateStr) ?? 0,
+        value,
         date: dateStr,
       });
+      lastValue = value;
       current.setDate(current.getDate() + 1);
     }
     return result;
-  }, [chartData]);
+  }, [chartData, isStock]);
   const hasChart = filledChartData.length > 1;
 
   // Compute when "UTC midnight" falls in the user's local time,

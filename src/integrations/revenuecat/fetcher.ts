@@ -720,6 +720,7 @@ export const revenuecatFetcher: DataFetcher = {
     const startDate = since || subDays(endDate, 90);
 
     // ── Step 1: Discover if the revenue chart supports product-type segmentation ──
+    reportStep?.({ key: "discover_revenue_segments", label: "Discover revenue chart segments", status: "running" });
     const t0Discover = Date.now();
     const revenueSegmentId = await discoverRevenueSegment(account.credentials);
     const discoverStep: SyncStep = {
@@ -739,6 +740,8 @@ export const revenuecatFetcher: DataFetcher = {
     let revenueChartData: RevenueCatChartData | null = null;
 
     for (const [chartName, internalKey] of Object.entries(REVENUECAT_CHART_MAP)) {
+      const stepKey = `fetch_chart_${chartName}`;
+      reportStep?.({ key: stepKey, label: `Fetch RevenueCat chart: ${chartName}`, status: "running" });
       const t0 = Date.now();
       try {
         const chartData = await fetchChart(account.credentials, chartName, startDate, endDate);
