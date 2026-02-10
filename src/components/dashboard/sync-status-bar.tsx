@@ -109,6 +109,10 @@ function formatLastUpdated(iso: string): string {
   return `${datePart} ${timePart}`;
 }
 
+function isSyncAlreadyRunningError(error?: string): boolean {
+  return (error ?? "").toLowerCase().includes("sync already running");
+}
+
 // --- Component ---
 
 export function SyncStatusBar({
@@ -201,8 +205,8 @@ export function SyncStatusBar({
                   status:
                     result.success
                       ? "done"
-                      : result.error?.toLowerCase().includes("sync already running")
-                        ? "syncing"
+                      : isSyncAlreadyRunningError(result.error)
+                        ? "cooldown"
                         : "error",
                   steps: result.steps,
                   recordsProcessed: result.recordsProcessed,
@@ -229,7 +233,7 @@ export function SyncStatusBar({
                   s.accountId === accountId
                     ? {
                         ...s,
-                        status: "syncing",
+                        status: "cooldown",
                         recordsProcessed: 0,
                         error: undefined,
                         lastSyncAt: data.status?.startedAt,
@@ -237,7 +241,6 @@ export function SyncStatusBar({
                     : s
                 )
               );
-              return;
             }
           } catch {
             lastSyncAt = undefined;
@@ -351,8 +354,8 @@ export function SyncStatusBar({
                   status:
                     result.success
                       ? "done"
-                      : result.error?.toLowerCase().includes("sync already running")
-                        ? "syncing"
+                      : isSyncAlreadyRunningError(result.error)
+                        ? "cooldown"
                         : "error",
                   steps: result.steps,
                   recordsProcessed: result.recordsProcessed,
@@ -379,7 +382,7 @@ export function SyncStatusBar({
                   idx === i
                     ? {
                         ...s,
-                        status: "syncing",
+                        status: "cooldown",
                         recordsProcessed: 0,
                         error: undefined,
                         lastSyncAt: data.status?.startedAt,
@@ -387,7 +390,7 @@ export function SyncStatusBar({
                     : s
                 )
               );
-              return;
+              continue;
             }
           } catch {
             lastSyncAt = undefined;
