@@ -27,6 +27,7 @@ import { apiPost } from "@/lib/api-client";
 import { formatCurrency } from "@/lib/format";
 import { shouldStartBackfill, shouldStartRangeBackfill } from "./compare-backfill";
 import { applyProjectGroupMerging, buildGroupLookup, type GroupLookup } from "./dashboard/group-merge";
+import { computeMrrDeltaEntries } from "./dashboard/mrr-delta";
 import { buildBreakdownByMetricAndDay } from "./dashboard/breakdowns";
 import { useDailyTotalsSnapshots } from "./dashboard/use-daily-totals-snapshots";
 import { usePendingFlags } from "./dashboard/use-pending-flags";
@@ -1172,62 +1173,7 @@ export function useDashboardData(): DashboardData {
         ? yesterdayMrrEntries
         : rawTodayMrrEntries;
 
-    // Build yesterday lookup by label
-    const yesterdayByLabel = new Map<string, number>();
-    for (const entry of yesterdayMrrEntries) {
-      yesterdayByLabel.set(entry.label, entry.value);
-    }
-
-    // Also collect labels that only exist in yesterday (churned sources)
-    const todayLabels = new Set(todayMrrEntries.map((e) => e.label));
-
-    // Compute deltas for today entries
-    const deltaEntries: RankingEntry[] = todayMrrEntries.map((entry) => {
-      const prevValue = yesterdayByLabel.get(entry.label) ?? 0;
-      const delta = entry.value - prevValue;
-
-      // Compute child deltas if present
-      const children = entry.children?.map((child) => {
-        // Find matching child in yesterday's entry
-        const yesterdayParent = yesterdayMrrEntries.find((e) => e.label === entry.label);
-        const prevChild = yesterdayParent?.children?.find((c) => c.label === child.label);
-        const childDelta = child.value - (prevChild?.value ?? 0);
-        return { ...child, value: childDelta };
-      });
-
-      return {
-        ...entry,
-        value: delta,
-        ...(children ? { children } : {}),
-      };
-    });
-
-    // Add entries that existed yesterday but not today (fully churned)
-    for (const entry of yesterdayMrrEntries) {
-      if (!todayLabels.has(entry.label)) {
-        deltaEntries.push({
-          ...entry,
-          value: -entry.value,
-          children: entry.children?.map((c) => ({ ...c, value: -c.value })),
-        });
-      }
-    }
-
-    // Filter out zero-delta entries, sort by absolute value, recalculate percentages
-    const nonZero = deltaEntries.filter((e) => e.value !== 0);
-    nonZero.sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
-    const absTotal = nonZero.reduce((sum, e) => sum + Math.abs(e.value), 0);
-    result.mrr = nonZero.map((e) => ({
-      ...e,
-      percentage: absTotal > 0 ? (Math.abs(e.value) / absTotal) * 100 : 0,
-      children: e.children?.map((c) => {
-        const parentAbs = Math.abs(e.value);
-        return {
-          ...c,
-          percentage: parentAbs > 0 ? (Math.abs(c.value) / parentAbs) * 100 : 0,
-        };
-      }),
-    }));
+    result.mrr = computeMrrDeltaEntries(todayMrrEntries, yesterdayMrrEntries);
 
     return result;
   }, [todayBlendedRankingsBeforeDelta, yesterdayBlendedRankings]);

@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import { format, startOfDay, subDays } from "date-fns";
 import type { AccountConfig } from "../../types";
 import { gumroadFetcher } from "../fetcher";
 
@@ -300,6 +301,47 @@ describe("Gumroad Fetcher", () => {
       expect(result.success).toBe(true);
       expect(result.metrics.length).toBeGreaterThan(0);
       expect(result.error).toBeUndefined();
+    });
+
+    it("should backfill one day for incremental sales fetch", async () => {
+      let salesUrl: string | null = null;
+      const minimalProduct = createMockProduct({
+        id: "prod_basic",
+        name: "Basic Product",
+        published: true,
+        is_tiered_membership: false,
+      });
+
+      const fetchMock = vi.fn(async (url: string | URL | Request) => {
+        const urlStr = url.toString();
+
+        if (urlStr.includes("/v2/sales")) {
+          salesUrl = urlStr;
+          return new Response(
+            JSON.stringify({ success: true, sales: [] }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        if (urlStr.includes("/v2/products")) {
+          return new Response(
+            JSON.stringify({ success: true, products: [minimalProduct] }),
+            { status: 200, headers: { "Content-Type": "application/json" } }
+          );
+        }
+
+        return new Response("Not found", { status: 404 });
+      });
+
+      vi.stubGlobal("fetch", fetchMock);
+
+      const since = new Date("2026-02-10T16:48:50Z");
+      const result = await gumroadFetcher.sync(mockAccount, since);
+
+      expect(result.success).toBe(true);
+      expect(salesUrl).toBeTruthy();
+      const expectedAfter = format(subDays(startOfDay(since), 1), "yyyy-MM-dd");
+      expect(salesUrl).toContain(`after=${expectedAfter}`);
     });
 
     // ── Per-product metrics ──────────────────────────────────────────────

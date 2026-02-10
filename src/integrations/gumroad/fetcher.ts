@@ -780,7 +780,11 @@ export const gumroadFetcher: DataFetcher = {
     reportStep?: (step: SyncStep) => void
   ): Promise<SyncResult> {
     const accessToken = account.credentials.access_token;
-    const syncSince = since || subDays(startOfDay(new Date()), 30);
+    // Gumroad /sales uses a date-only "after" filter. Backfill 1 day for
+    // incremental syncs to avoid missing same-day late-arriving sales.
+    const syncSince = since
+      ? subDays(startOfDay(since), 1)
+      : subDays(startOfDay(new Date()), 30);
     const today = format(new Date(), "yyyy-MM-dd");
 
     const steps: SyncStep[] = [];
