@@ -75,23 +75,70 @@ export async function GET(request: Request) {
   if (from) conditions.push(gte(metrics.date, from));
   if (to) conditions.push(lte(metrics.date, to));
 
-  // Fetch all rows grouped by country + account + project
-  const rawRows = db
-    .select({
-      country: sql<string>`json_extract(${metrics.metadata}, '$.country')`.as("country"),
-      count: sql<number>`CAST(SUM(${metrics.value}) AS INTEGER)`.as("count"),
-      accountId: metrics.accountId,
-      projectId: sql<string | null>`${metrics.projectId}`.as("projectId"),
-    })
-    .from(metrics)
-    .where(and(...conditions))
-    .groupBy(
-      sql`json_extract(${metrics.metadata}, '$.country')`,
-      metrics.accountId,
-      metrics.projectId
-    )
-    .orderBy(sql`SUM(${metrics.value}) DESC`)
-    .all();
+  // `paying_customers_by_country` is a stock metric (point-in-time snapshot).
+  // Each sync writes one snapshot per country for that day's date. Summing
+  // across dates would inflate the count (same subscribers counted every day).
+  // We take only the latest available date per account+project.
+  //
+  // `new_customers_by_country` is a flow metric (new per day). Summing across
+  // the date range gives the correct total of unique new customers.
+  const isStockMetric = metricType === "paying_customers_by_country";
+
+  let rawRows: { country: string; count: number; accountId: string; projectId: string | null }[];
+
+  if (isStockMetric) {
+    const allRows = db
+      .select({
+        country: sql<string>`json_extract(${metrics.metadata}, '$.country')`.as("country"),
+        value: sql<number>`CAST(${metrics.value} AS INTEGER)`.as("value"),
+        accountId: metrics.accountId,
+        projectId: sql<string | null>`${metrics.projectId}`.as("projectId"),
+        date: metrics.date,
+      })
+      .from(metrics)
+      .where(and(...conditions))
+      .all();
+
+    const latestDateBySource = new Map<string, string>();
+    for (const row of allRows) {
+      const key = `${row.accountId}\0${row.projectId ?? ""}`;
+      const cur = latestDateBySource.get(key);
+      if (!cur || row.date > cur) latestDateBySource.set(key, row.date);
+    }
+
+    const agg = new Map<string, { country: string; count: number; accountId: string; projectId: string | null }>();
+    for (const row of allRows) {
+      const sourceKey = `${row.accountId}\0${row.projectId ?? ""}`;
+      if (row.date !== latestDateBySource.get(sourceKey)) continue;
+
+      const aggKey = `${row.country}\0${row.accountId}\0${row.projectId ?? ""}`;
+      const existing = agg.get(aggKey);
+      if (existing) {
+        existing.count += row.value;
+      } else {
+        agg.set(aggKey, { country: row.country, count: row.value, accountId: row.accountId, projectId: row.projectId });
+      }
+    }
+
+    rawRows = Array.from(agg.values()).sort((a, b) => b.count - a.count);
+  } else {
+    rawRows = db
+      .select({
+        country: sql<string>`json_extract(${metrics.metadata}, '$.country')`.as("country"),
+        count: sql<number>`CAST(SUM(${metrics.value}) AS INTEGER)`.as("count"),
+        accountId: metrics.accountId,
+        projectId: sql<string | null>`${metrics.projectId}`.as("projectId"),
+      })
+      .from(metrics)
+      .where(and(...conditions))
+      .groupBy(
+        sql`json_extract(${metrics.metadata}, '$.country')`,
+        metrics.accountId,
+        metrics.projectId
+      )
+      .orderBy(sql`SUM(${metrics.value}) DESC`)
+      .all();
+  }
 
   // ── Blending: identify accounts that have product-level data ──
   // If an account has ANY row with a non-null projectId, drop all its

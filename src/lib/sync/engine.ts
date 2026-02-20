@@ -460,6 +460,17 @@ function storeMetricsBatch(
 const STORE_BATCH_SIZE = 100;
 
 /**
+ * Snapshot (stock) metrics represent a point-in-time count — the value on a
+ * given date is the *total* at that moment, NOT an incremental delta. Keeping
+ * rows from previous sync dates would cause SUM-based aggregations to inflate
+ * counts. We delete all prior rows for the account+type before inserting the
+ * fresh snapshot.
+ */
+const SNAPSHOT_METRIC_TYPES = new Set([
+  "paying_customers_by_country",
+]);
+
+/**
  * Store normalized metrics in batched transactions, yielding to the event loop
  * between batches so progress polling requests can be served.
  */
@@ -468,6 +479,18 @@ async function storeMetrics(
   accountId: string,
   newMetrics: NormalizedMetric[]
 ): Promise<void> {
+  // Pre-delete stale snapshot data so old dates don't accumulate.
+  const snapshotTypes = new Set(
+    newMetrics
+      .map((m) => m.metricType)
+      .filter((t) => SNAPSHOT_METRIC_TYPES.has(t))
+  );
+  for (const mt of snapshotTypes) {
+    db.delete(metrics)
+      .where(and(eq(metrics.accountId, accountId), eq(metrics.metricType, mt)))
+      .run();
+  }
+
   for (let i = 0; i < newMetrics.length; i += STORE_BATCH_SIZE) {
     storeMetricsBatch(db, accountId, newMetrics.slice(i, i + STORE_BATCH_SIZE));
     // Yield to the event loop so progress poll requests can be served
